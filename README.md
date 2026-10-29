@@ -61,8 +61,12 @@
 需要 JDK 17 与 Android SDK（platform 34、build-tools 34.0.0）。
 
 ```bash
-./gradlew assembleRelease
+gradle assembleRelease
 ```
+
+> 仓库未包含 `gradle/wrapper/gradle-wrapper.jar`（二进制文件）。
+> 如需 `./gradlew`，先在本机执行一次 `gradle wrapper --gradle-version 8.7`，
+> 或用 Android Studio 打开项目让它自动补齐。
 
 `release` 构建需要签名密钥。**仓库里不含密钥**，需自行生成：
 
