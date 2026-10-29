@@ -1,0 +1,33 @@
+# 依赖
+.gradle/
+.kotlin/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 本地配置（含 SDK 路径，因机器而异）
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 签名密钥 —— 绝不可提交
+# keystore.properties 含密码，keystore.jks 含私钥。
+# 泄露后任何人都能伪造同包名的更新包覆盖用户已装的应用。
+keystore.properties
+keystore.jks
+*.jks
+*.keystore
+
+# 构建产物
+dist/
+*.apk
+*.aab
+
+# 临时脚本
+scratch/
+*.log

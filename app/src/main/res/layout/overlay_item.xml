@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 单条待办：一个圆点 + 一行文字，保持极简 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
+
+    <View
+        android:layout_width="5dp"
+        android:layout_height="5dp"
+        android:layout_marginEnd="10dp"
+        android:background="@drawable/shape_dot" />
+
+    <TextView
+        android:id="@+id/tv_item"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="#E6FFFFFF"
+        android:textSize="14sp" />
+
+</LinearLayout>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">今日待办</string>
+
+    <!-- 通知渠道 -->
+    <string name="channel_unlock_name">解锁提醒服务</string>
+    <string name="channel_unlock_desc">保持解锁监听，用于在解锁后显示今日待办卡片</string>
+    <string name="notify_title">解锁提醒已开启</string>
+    <string name="notify_text">解锁屏幕后会弹出今日待办</string>
+
+    <!-- 悬浮卡片 -->
+    <string name="overlay_title">今日待办</string>
+    <string name="overlay_countdown">%1$d 秒后关闭</string>
+    <string name="overlay_more">还有 %1$d 项未显示</string>
+
+    <!-- 设置页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_overlay_switch">解锁弹窗提醒</string>
+    <string name="settings_overlay_switch_desc">解锁屏幕后自动弹出今日未完成事项</string>
+    <string name="settings_duration">显示时长</string>
+    <string name="settings_permission_overlay">悬浮窗权限</string>
+    <string name="settings_permission_overlay_desc">未授权时无法显示卡片</string>
+    <string name="settings_battery">后台保活设置</string>
+    <string name="settings_battery_desc">国内定制系统需关闭电池优化并允许自启动</string>
+</resources>

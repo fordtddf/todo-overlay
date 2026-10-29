@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  深色卡片底。
+  注意：这里用不透明色，整体透明度交给窗口的 LayoutParams.alpha 控制。
+  Android 12+ 的 BlockUntrustedTouches 机制会丢弃穿过「不透明度 > 0.8 的
+  非可信悬浮窗」的触摸事件，所以窗口 alpha 必须压到 0.8 以下，
+  否则卡片显示期间手指完全点不动、也滑不动。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FF1C1C22" />
+    <corners android:radius="22dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#26FFFFFF" />
+</shape>
