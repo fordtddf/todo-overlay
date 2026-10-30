@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -20,16 +21,19 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.core.view.isVisible
 import com.example.todooverlay.R
 import com.example.todooverlay.data.Todo
 import kotlin.math.ceil
+import kotlin.math.min
 
 /**
  * 解锁悬浮卡片。
  *
  * 窗口只在自己的卡片矩形内接收触摸（FLAG_NOT_TOUCH_MODAL），
- * 卡片以外的区域完全穿透给下层桌面/应用，绝不挡图标。
+ * 卡片以外的区域完全穿透给下层桌面/应用。
+ *
+ * 卡片**不会**因为用户点了外面而关闭 —— 只有两种情况会消失：
+ * ① 倒计时自然走完；② 用户点了卡片右上角的关闭按钮。
  *
  * 注意：不要加 FLAG_BLUR_BEHIND。Android 12+ 上系统会为模糊在窗口下铺一层
  * Dim Layer，那层遮罩的不透明度超过 BlockUntrustedTouches 的阈值，
@@ -50,17 +54,16 @@ class OverlayManager(context: Context) {
     private var completionTriggered = false
 
     /**
-     * 展示待完成事项。[todos] 已按「每日优先 + 创建时间」排好序并截断到 [MAX_ITEMS]。
+     * 展示全部待完成事项。[todos] 已按「每日优先 + 创建时间」排好序。
      * [onToggle] 在用户点选某一条时回调，第二个参数是勾选后的状态。
      */
     fun show(
         todos: List<Todo>,
-        totalCount: Int,
         durationSeconds: Int,
         onToggle: (Todo, Boolean) -> Unit
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { show(todos, totalCount, durationSeconds, onToggle) }
+            mainHandler.post { show(todos, durationSeconds, onToggle) }
             return
         }
         // 上一次还没淡出完就又被解锁了：先干净移除，避免叠加
@@ -70,8 +73,8 @@ class OverlayManager(context: Context) {
         if (!Settings.canDrawOverlays(appContext)) return
 
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
-        bindContent(view, todos, totalCount, durationSeconds, onToggle)
-        attachTouchHandlers(view)
+        bindContent(view, todos, durationSeconds, onToggle)
+        attachInteractionHandlers(view)
 
         view.alpha = 0f
         try {
@@ -108,15 +111,13 @@ class OverlayManager(context: Context) {
     private fun bindContent(
         view: View,
         todos: List<Todo>,
-        totalCount: Int,
         durationSeconds: Int,
         onToggle: (Todo, Boolean) -> Unit
     ) {
-        val shown = todos.take(MAX_ITEMS)
         val container = view.findViewById<LinearLayout>(R.id.container_items)
         val inflater = LayoutInflater.from(view.context)
 
-        shown.forEach { todo ->
+        todos.forEach { todo ->
             val row = inflater.inflate(R.layout.overlay_item, container, false)
             val checkBox = row.findViewById<CheckBox>(R.id.cb_item)
             val label = row.findViewById<TextView>(R.id.tv_item)
@@ -138,15 +139,16 @@ class OverlayManager(context: Context) {
             container.addView(row)
         }
 
-        val subtitle = view.findViewById<TextView>(R.id.tv_subtitle)
-        val rest = totalCount - shown.size
-        if (rest > 0) {
-            subtitle.isVisible = true
-            subtitle.text = appContext.getString(R.string.overlay_more, rest)
-        }
+        // 列表高度封顶：条目少时卡片自适应，条目多时在卡片内部滚动，
+        // 卡片整体尺寸保持和原来 5 条时一致
+        val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
+        scroll.maxHeight = min(dp(LIST_MAX_HEIGHT_DP), (screenHeight() * 0.5f).toInt())
+        attachInteractionHandlers(scroll)
 
         view.findViewById<TextView>(R.id.tv_countdown).text =
             appContext.getString(R.string.overlay_countdown, durationSeconds)
+
+        view.findViewById<View>(R.id.btn_close).setOnClickListener { fadeOut() }
     }
 
     /** 勾选后的即时视觉反馈：删除线 + 置灰，不等数据库回来 */
@@ -162,18 +164,20 @@ class OverlayManager(context: Context) {
 
     // ---------------------------------------------------------------- 交互
 
-    private fun attachTouchHandlers(view: View) {
-        // 卡片内部的空白区域也要消费掉触摸，避免穿透到下层应用
-        view.isClickable = true
-        view.setOnTouchListener { _, event ->
+    /**
+     * 手指按住卡片（含列表区域）就暂停倒计时，抬手后重新给一段宽限时间。
+     *
+     * 注意这里**不处理** ACTION_OUTSIDE：点到卡片外面时卡片必须保持不动，
+     * 那一下点击由系统正常传给下层应用。
+     */
+    private fun attachInteractionHandlers(target: View) {
+        target.isClickable = true
+        target.setOnTouchListener { _, event ->
             when (event.actionMasked) {
-                // 手指按住卡片：暂停倒计时，让用户从容点选
-                MotionEvent.ACTION_DOWN -> if (!completionTriggered) countdown?.pause()
-                // 抬手：恢复倒计时（已经勾选过的话就让它走延时关闭）
+                MotionEvent.ACTION_DOWN ->
+                    if (!completionTriggered) countdown?.pause()
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    if (!completionTriggered) countdown?.resume()
-                // 点到卡片外面：直接收起，这一下仍会正常传给下层应用
-                MotionEvent.ACTION_OUTSIDE -> fadeOut()
+                    if (!completionTriggered) restartCountdownWithGrace()
             }
             false
         }
@@ -204,7 +208,15 @@ class OverlayManager(context: Context) {
 
     // ---------------------------------------------------------------- 倒计时
 
+    /** 抬手后重新计时，避免用户刚滑完列表卡片就消失 */
+    private fun restartCountdownWithGrace() {
+        val view = rootView ?: return
+        startCountdown(view, GRACE_SECONDS)
+    }
+
     private fun startCountdown(view: View, durationSeconds: Int) {
+        cancelCountdown()
+
         val progress = view.findViewById<ProgressBar>(R.id.progress)
         val label = view.findViewById<TextView>(R.id.tv_countdown)
 
@@ -278,11 +290,10 @@ class OverlayManager(context: Context) {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // 不加 FLAG_NOT_TOUCHABLE：卡片要能接收点击。
-            // FLAG_NOT_TOUCH_MODAL 保证窗口矩形之外的触摸照常交给下层应用，
-            // FLAG_WATCH_OUTSIDE_TOUCH 让我们能感知「点到外面了」并顺手收起。
+            // FLAG_NOT_TOUCH_MODAL 保证窗口矩形之外的触摸照常交给下层应用。
+            // 不要加 FLAG_WATCH_OUTSIDE_TOUCH —— 那会让我们把「点了外面」当成关闭信号。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
@@ -292,7 +303,7 @@ class OverlayManager(context: Context) {
     }
 
     private fun screenWidth(): Int =
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             windowManager.currentWindowMetrics.bounds.width()
         } else {
             val metrics = DisplayMetrics()
@@ -301,19 +312,32 @@ class OverlayManager(context: Context) {
             metrics.widthPixels
         }
 
+    private fun screenHeight(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowManager.currentWindowMetrics.bounds.height()
+        } else {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+            metrics.heightPixels
+        }
+
     private fun dp(value: Int): Int =
         (value * appContext.resources.displayMetrics.density).toInt()
 
     companion object {
-        /** 卡片最多展示几条，多了就变成列表，违背“瞥一眼就走” */
-        const val MAX_ITEMS = 5
-
         private const val FADE_IN_MS = 180L
         private const val FADE_OUT_MS = 260L
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_MARGIN_DP = 52
 
+        /** 列表区域的最大高度，约等于原来 5 条时的高度，卡片整体尺寸不变 */
+        private const val LIST_MAX_HEIGHT_DP = 150
+
         /** 勾选后停留多久再淡出，留出看清反馈的时间 */
         private const val CLOSE_DELAY_MS = 1800L
+
+        /** 手指离开卡片后重新计时的秒数 */
+        private const val GRACE_SECONDS = 4
     }
 }

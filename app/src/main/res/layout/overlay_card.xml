@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  解锁悬浮卡片：纯展示，不接收任何点击/输入交互。
-  根布局用 wrap_content，避免遮挡屏幕下方图标的触控区域。
+  解锁悬浮卡片。
+  列表放在 MaxHeightScrollView 里：条目少时卡片自适应收缩，
+  条目多时封顶在屏幕高度一半以内并可以上下滑动。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/card_root"
@@ -11,15 +12,16 @@
     android:elevation="12dp"
     android:orientation="vertical"
     android:paddingStart="20dp"
-    android:paddingTop="16dp"
-    android:paddingEnd="20dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="12dp"
     android:paddingBottom="14dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:paddingEnd="8dp">
 
         <TextView
             android:id="@+id/tv_title"
@@ -37,31 +39,40 @@
             android:layout_height="wrap_content"
             android:textColor="#B3FFFFFF"
             android:textSize="13sp" />
+
+        <ImageButton
+            android:id="@+id/btn_close"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginStart="4dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/overlay_close"
+            android:padding="6dp"
+            android:src="@drawable/ic_close" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tv_subtitle"
+    <com.example.todooverlay.overlay.MaxHeightScrollView
+        android:id="@+id/scroll_items"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="#80FFFFFF"
-        android:textSize="12sp"
-        android:visibility="gone" />
+        android:layout_marginTop="8dp"
+        android:overScrollMode="ifContentScrolls"
+        android:scrollbars="none">
 
-    <!-- 事项列表：代码里动态填充，最多 5 条 -->
-    <LinearLayout
-        android:id="@+id/container_items"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:orientation="vertical" />
+        <LinearLayout
+            android:id="@+id/container_items"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </com.example.todooverlay.overlay.MaxHeightScrollView>
 
     <ProgressBar
         android:id="@+id/progress"
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
         android:layout_height="3dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="8dp"
         android:max="1000"
         android:progress="1000"
         android:progressDrawable="@drawable/progress_overlay" />

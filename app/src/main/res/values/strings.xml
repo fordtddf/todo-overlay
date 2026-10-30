@@ -11,10 +11,9 @@
     <!-- 悬浮卡片 -->
     <string name="overlay_title">今日待办</string>
     <string name="overlay_countdown">%1$d 秒后关闭</string>
-    <string name="overlay_more">还有 %1$d 项未显示</string>
     <string name="overlay_completed">已记录，即将关闭</string>
-    <string name="overlay_tap_hint">点一下即可完成</string>
     <string name="overlay_daily_prefix">每日 · %1$s</string>
+    <string name="overlay_close">关闭卡片</string>
 
     <!-- 列表页 -->
     <string name="todo_add_title">添加待办</string>

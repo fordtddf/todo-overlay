@@ -16,6 +16,7 @@ interface TodoDao {
 
     /**
      * 悬浮窗用：今日未完成的每日任务 + 所有未完成的单次任务。
+     * 不设上限，条目多时由卡片内部滚动展示。
      *
      * 每日任务的完成判定写在这里（last_completed_date != today），
      * 所以跨日之后不需要任何重置动作，查询结果自然就回到未完成。
@@ -26,20 +27,9 @@ interface TodoDao {
         WHERE (is_daily = 1 AND (last_completed_date IS NULL OR last_completed_date != :today))
            OR (is_daily = 0 AND is_completed = 0)
         ORDER BY is_daily ASC, created_at ASC
-        LIMIT :limit
         """
     )
-    suspend fun pendingForOverlay(today: String, limit: Int): List<Todo>
-
-    /** 同上，只是取总数，用于卡片上提示「还有 N 项未显示」 */
-    @Query(
-        """
-        SELECT COUNT(*) FROM todos
-        WHERE (is_daily = 1 AND (last_completed_date IS NULL OR last_completed_date != :today))
-           OR (is_daily = 0 AND is_completed = 0)
-        """
-    )
-    suspend fun pendingCount(today: String): Int
+    suspend fun pendingForOverlay(today: String): List<Todo>
 
     @Insert
     suspend fun insert(todo: Todo): Long
