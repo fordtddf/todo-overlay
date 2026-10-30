@@ -502,6 +502,7 @@ private fun SettingsScreen(
     val landscape by vm.landscapeMute.collectAsStateWithLifecycle()
     val sortMode by vm.sortMode.collectAsStateWithLifecycle()
     val existsTime by vm.showExistsTime.collectAsStateWithLifecycle()
+    val vocab by vm.vocabEnabled.collectAsStateWithLifecycle()
     val opacityPercent by vm.cardOpacityPercent.collectAsStateWithLifecycle()
     val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
     val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
@@ -526,6 +527,7 @@ private fun SettingsScreen(
     val landscapeOn = landscape ?: true
     val sortModeValue = sortMode ?: SortMode.PRIORITY
     val existsTimeOn = existsTime ?: true
+    val vocabOn = vocab ?: true
     val cardOpacity = opacityPercent ?: SettingsStore.DEFAULT_OPACITY_PERCENT
     val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
     val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
@@ -1079,6 +1081,20 @@ private fun SettingsScreen(
                     checked = existsTimeOn,
                     onChange = vm::setShowExistsTime
                 )
+                ToggleRow(
+                    title = "显示六级单词",
+                    desc = "每次弹窗在底部展示 5 个没出现过的六级词",
+                    checked = vocabOn,
+                    onChange = vm::setVocabEnabled
+                )
+                if (vocabOn) {
+                    TextButton(
+                        onClick = { vm.resetSeenWords() },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text("重置已学单词记录")
+                    }
+                }
             }
 
             // ---------------- 进阶显示 ----------------

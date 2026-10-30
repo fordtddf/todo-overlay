@@ -113,6 +113,8 @@ class SettingsStore(private val context: Context) {
 
     val showExistsTime: Flow<Boolean> = prefs.map { it[KEY_SHOW_EXISTS] ?: true }
 
+    val vocabEnabled: Flow<Boolean> = prefs.map { it[KEY_VOCAB] ?: true }
+
     val lowBatteryMode: Flow<Boolean> = prefs.map { it[KEY_LOW_BATTERY] ?: true }
 
     val landscapeMute: Flow<Boolean> = prefs.map { it[KEY_LANDSCAPE_MUTE] ?: true }
@@ -152,6 +154,23 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setShowExistsTime(enabled: Boolean) =
         context.dataStore.edit { it[KEY_SHOW_EXISTS] = enabled }
+
+    suspend fun setVocabEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_VOCAB] = enabled }
+
+    /**
+     * 挑本次要展示的单词，并把它们记为「已出现过」。
+     * 全部轮完后 [WordBank.pick] 会自动重置，不会永远重复同几个词。
+     */
+    suspend fun pickWords(count: Int = WordBank.PER_POPUP): List<Word> {
+        val seen = context.dataStore.data.first()[KEY_SEEN_WORDS] ?: emptySet()
+        val (picked, newSeen) = WordBank.pick(seen, count)
+        context.dataStore.edit { it[KEY_SEEN_WORDS] = newSeen }
+        return picked
+    }
+
+    suspend fun resetSeenWords() =
+        context.dataStore.edit { it.remove(KEY_SEEN_WORDS) }
 
     suspend fun setLowBatteryMode(enabled: Boolean) =
         context.dataStore.edit { it[KEY_LOW_BATTERY] = enabled }
@@ -235,7 +254,8 @@ class SettingsStore(private val context: Context) {
             lowBatteryMode = p[KEY_LOW_BATTERY] ?: true,
             landscapeMute = p[KEY_LANDSCAPE_MUTE] ?: true,
             sortMode = SortMode.from(p[KEY_SORT_MODE]),
-            showExistsTime = p[KEY_SHOW_EXISTS] ?: true
+            showExistsTime = p[KEY_SHOW_EXISTS] ?: true,
+            vocabEnabled = p[KEY_VOCAB] ?: true
         )
     }
 
@@ -261,7 +281,8 @@ class SettingsStore(private val context: Context) {
         val lowBatteryMode: Boolean,
         val landscapeMute: Boolean,
         val sortMode: SortMode,
-        val showExistsTime: Boolean
+        val showExistsTime: Boolean,
+        val vocabEnabled: Boolean
     )
 
     companion object {
@@ -344,6 +365,10 @@ class SettingsStore(private val context: Context) {
         private val KEY_LANDSCAPE_MUTE = booleanPreferencesKey("overlay_landscape_mute")
         private val KEY_SORT_MODE = stringPreferencesKey("todo_sort_mode")
         private val KEY_SHOW_EXISTS = booleanPreferencesKey("show_exists_time")
+        private val KEY_VOCAB = booleanPreferencesKey("show_vocab")
+        private val KEY_SEEN_WORDS = androidx.datastore.preferences.core.stringSetPreferencesKey(
+            "seen_words"
+        )
         private val KEY_LAST_SHOWN = androidx.datastore.preferences.core.longPreferencesKey(
             "overlay_last_shown_at"
         )

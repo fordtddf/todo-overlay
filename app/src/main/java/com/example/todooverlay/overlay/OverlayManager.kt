@@ -31,6 +31,7 @@ import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.TimeFormat
 import com.example.todooverlay.data.Todo
+import com.example.todooverlay.data.Word
 import kotlin.math.ceil
 import kotlin.math.min
 
@@ -61,7 +62,9 @@ data class OverlayConfig(
     /** 低电量降级：禁用动画，静态展示 */
     val forceStatic: Boolean,
     /** 是否显示待办存在时长 */
-    val showExistsTime: Boolean
+    val showExistsTime: Boolean,
+    /** 本次要展示的六级单词，空表示不显示 */
+    val words: List<Word> = emptyList()
 )
 
 /**
@@ -116,6 +119,7 @@ class OverlayManager(context: Context) {
 
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
         bindContent(view, todos, config, onToggle)
+        bindWords(view, config)
         applyProgress(view, config)
         applySize(view, config)
         applyOpacity(view, config)
@@ -332,6 +336,17 @@ class OverlayManager(context: Context) {
         Todo.PRIORITY_HIGH -> 0xFFFFB74D.toInt()
         Todo.PRIORITY_LOW -> 0xFF9E9E9E.toInt()
         else -> 0xFF64B5F6.toInt()
+    }
+
+    /** 卡片底部的 5 个六级新词 */
+    private fun bindWords(view: View, config: OverlayConfig) {
+        if (config.words.isEmpty()) return
+        val container = view.findViewById<LinearLayout>(R.id.container_words)
+        val text = view.findViewById<TextView>(R.id.tv_words)
+        container.isVisible = true
+        text.text = config.words.joinToString("\n") {
+            appContext.getString(R.string.overlay_word_line, it.text, it.meaning)
+        }
     }
 
     /** 顶部今日完成进度：3/7 · 42% */

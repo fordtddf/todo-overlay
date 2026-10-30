@@ -37,6 +37,17 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
     val showExistsTime: StateFlow<Boolean?> = settings.showExistsTime
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    val vocabEnabled: StateFlow<Boolean?> = settings.vocabEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun setVocabEnabled(enabled: Boolean) {
+        viewModelScope.launch { settings.setVocabEnabled(enabled) }
+    }
+
+    fun resetSeenWords() {
+        viewModelScope.launch { settings.resetSeenWords() }
+    }
+
     val overlayEnabled: StateFlow<Boolean?> = settings.overlayEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 

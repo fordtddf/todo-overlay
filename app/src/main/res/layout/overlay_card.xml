@@ -131,6 +131,40 @@
         android:progress="1000"
         android:progressDrawable="@drawable/progress_overlay" />
 
+    <!-- 六级单词：每次弹窗换 5 个新词 -->
+    <LinearLayout
+        android:id="@+id/container_words"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="8dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1FFFFFFF" />
+
+        <TextView
+            android:id="@+id/tv_words_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/overlay_words_title"
+            android:textColor="#73FFFFFF"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tv_words"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:lineSpacingExtra="3dp"
+            android:textColor="#CCFFFFFF"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <!-- 快速记一笔：点击后就地展开输入框 -->
     <TextView
         android:id="@+id/btn_quick_add"

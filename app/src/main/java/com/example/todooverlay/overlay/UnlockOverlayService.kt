@@ -161,7 +161,12 @@ class UnlockOverlayService : Service() {
                     progressTotal = total,
                     // 低电量时强制静态短展示
                     forceStatic = lowBattery,
-                    showExistsTime = settings.showExistsTime
+                    showExistsTime = settings.showExistsTime,
+                    words = if (settings.vocabEnabled && !lowBattery) {
+                        app.settings.pickWords()
+                    } else {
+                        emptyList()
+                    }
                 ),
                 onToggle = { todo, isDone ->
                     // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位
