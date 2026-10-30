@@ -115,6 +115,18 @@ class SettingsStore(private val context: Context) {
 
     val vocabEnabled: Flow<Boolean> = prefs.map { it[KEY_VOCAB] ?: true }
 
+    /** 每次弹窗展示几个单词 */
+    val vocabCount: Flow<Int> = prefs.map {
+        (it[KEY_VOCAB_COUNT] ?: DEFAULT_VOCAB_COUNT)
+            .coerceIn(MIN_VOCAB_COUNT, MAX_VOCAB_COUNT)
+    }
+
+    /** 单词区字号（sp） */
+    val vocabTextSizeSp: Flow<Int> = prefs.map {
+        (it[KEY_VOCAB_SIZE] ?: DEFAULT_VOCAB_SIZE)
+            .coerceIn(MIN_VOCAB_SIZE, MAX_VOCAB_SIZE)
+    }
+
     val lowBatteryMode: Flow<Boolean> = prefs.map { it[KEY_LOW_BATTERY] ?: true }
 
     val landscapeMute: Flow<Boolean> = prefs.map { it[KEY_LANDSCAPE_MUTE] ?: true }
@@ -157,6 +169,16 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setVocabEnabled(enabled: Boolean) =
         context.dataStore.edit { it[KEY_VOCAB] = enabled }
+
+    suspend fun setVocabCount(count: Int) =
+        context.dataStore.edit {
+            it[KEY_VOCAB_COUNT] = count.coerceIn(MIN_VOCAB_COUNT, MAX_VOCAB_COUNT)
+        }
+
+    suspend fun setVocabTextSizeSp(size: Int) =
+        context.dataStore.edit {
+            it[KEY_VOCAB_SIZE] = size.coerceIn(MIN_VOCAB_SIZE, MAX_VOCAB_SIZE)
+        }
 
     /**
      * 挑本次要展示的单词，并把它们记为「已出现过」。
@@ -255,7 +277,11 @@ class SettingsStore(private val context: Context) {
             landscapeMute = p[KEY_LANDSCAPE_MUTE] ?: true,
             sortMode = SortMode.from(p[KEY_SORT_MODE]),
             showExistsTime = p[KEY_SHOW_EXISTS] ?: true,
-            vocabEnabled = p[KEY_VOCAB] ?: true
+            vocabEnabled = p[KEY_VOCAB] ?: true,
+            vocabCount = (p[KEY_VOCAB_COUNT] ?: DEFAULT_VOCAB_COUNT)
+                .coerceIn(MIN_VOCAB_COUNT, MAX_VOCAB_COUNT),
+            vocabTextSizeSp = (p[KEY_VOCAB_SIZE] ?: DEFAULT_VOCAB_SIZE)
+                .coerceIn(MIN_VOCAB_SIZE, MAX_VOCAB_SIZE)
         )
     }
 
@@ -282,7 +308,9 @@ class SettingsStore(private val context: Context) {
         val landscapeMute: Boolean,
         val sortMode: SortMode,
         val showExistsTime: Boolean,
-        val vocabEnabled: Boolean
+        val vocabEnabled: Boolean,
+        val vocabCount: Int,
+        val vocabTextSizeSp: Int
     )
 
     companion object {
@@ -366,6 +394,18 @@ class SettingsStore(private val context: Context) {
         private val KEY_SORT_MODE = stringPreferencesKey("todo_sort_mode")
         private val KEY_SHOW_EXISTS = booleanPreferencesKey("show_exists_time")
         private val KEY_VOCAB = booleanPreferencesKey("show_vocab")
+        private val KEY_VOCAB_COUNT = intPreferencesKey("vocab_count")
+        private val KEY_VOCAB_SIZE = intPreferencesKey("vocab_text_size_sp")
+
+        /** 每次弹窗展示的单词数量 */
+        const val MIN_VOCAB_COUNT = 1
+        const val MAX_VOCAB_COUNT = 10
+        const val DEFAULT_VOCAB_COUNT = 5
+
+        /** 单词区字号，单位 sp */
+        const val MIN_VOCAB_SIZE = 10
+        const val MAX_VOCAB_SIZE = 20
+        const val DEFAULT_VOCAB_SIZE = 12
         private val KEY_SEEN_WORDS = androidx.datastore.preferences.core.stringSetPreferencesKey(
             "seen_words"
         )

@@ -93,6 +93,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.example.todooverlay.data.SortMode
 import com.example.todooverlay.data.TimeFormat
+import com.example.todooverlay.data.WordBank
 
 class MainActivity : ComponentActivity() {
 
@@ -503,6 +504,8 @@ private fun SettingsScreen(
     val sortMode by vm.sortMode.collectAsStateWithLifecycle()
     val existsTime by vm.showExistsTime.collectAsStateWithLifecycle()
     val vocab by vm.vocabEnabled.collectAsStateWithLifecycle()
+    val vocabCount by vm.vocabCount.collectAsStateWithLifecycle()
+    val vocabSize by vm.vocabTextSizeSp.collectAsStateWithLifecycle()
     val opacityPercent by vm.cardOpacityPercent.collectAsStateWithLifecycle()
     val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
     val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
@@ -528,6 +531,8 @@ private fun SettingsScreen(
     val sortModeValue = sortMode ?: SortMode.PRIORITY
     val existsTimeOn = existsTime ?: true
     val vocabOn = vocab ?: true
+    val vocabCountValue = vocabCount ?: SettingsStore.DEFAULT_VOCAB_COUNT
+    val vocabSizeValue = vocabSize ?: SettingsStore.DEFAULT_VOCAB_SIZE
     val cardOpacity = opacityPercent ?: SettingsStore.DEFAULT_OPACITY_PERCENT
     val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
     val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
@@ -1088,6 +1093,47 @@ private fun SettingsScreen(
                     onChange = vm::setVocabEnabled
                 )
                 if (vocabOn) {
+                    var countSlider by remember(vocabCountValue) {
+                        mutableFloatStateOf(vocabCountValue.toFloat())
+                    }
+                    Text(
+                        "每次展示 ${countSlider.roundToInt()} 个单词",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    Slider(
+                        value = countSlider,
+                        onValueChange = { countSlider = it },
+                        onValueChangeFinished = {
+                            vm.setVocabCount(countSlider.roundToInt())
+                        },
+                        valueRange = SettingsStore.MIN_VOCAB_COUNT.toFloat()..
+                            SettingsStore.MAX_VOCAB_COUNT.toFloat(),
+                        steps = SettingsStore.MAX_VOCAB_COUNT - SettingsStore.MIN_VOCAB_COUNT - 1
+                    )
+
+                    var sizeSlider by remember(vocabSizeValue) {
+                        mutableFloatStateOf(vocabSizeValue.toFloat())
+                    }
+                    Text(
+                        "单词字号 ${sizeSlider.roundToInt()} sp",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Slider(
+                        value = sizeSlider,
+                        onValueChange = { sizeSlider = it },
+                        onValueChangeFinished = {
+                            vm.setVocabTextSizeSp(sizeSlider.roundToInt())
+                        },
+                        valueRange = SettingsStore.MIN_VOCAB_SIZE.toFloat()..
+                            SettingsStore.MAX_VOCAB_SIZE.toFloat(),
+                        steps = SettingsStore.MAX_VOCAB_SIZE - SettingsStore.MIN_VOCAB_SIZE - 1
+                    )
+                    Text(
+                        "词库共 ${WordBank.all.size} 个词，轮完一轮才会重复",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     TextButton(
                         onClick = { vm.resetSeenWords() },
                         contentPadding = PaddingValues(0.dp)

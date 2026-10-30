@@ -40,8 +40,22 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
     val vocabEnabled: StateFlow<Boolean?> = settings.vocabEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    val vocabCount: StateFlow<Int?> = settings.vocabCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val vocabTextSizeSp: StateFlow<Int?> = settings.vocabTextSizeSp
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     fun setVocabEnabled(enabled: Boolean) {
         viewModelScope.launch { settings.setVocabEnabled(enabled) }
+    }
+
+    fun setVocabCount(count: Int) {
+        viewModelScope.launch { settings.setVocabCount(count) }
+    }
+
+    fun setVocabTextSizeSp(size: Int) {
+        viewModelScope.launch { settings.setVocabTextSizeSp(size) }
     }
 
     fun resetSeenWords() {

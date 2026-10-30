@@ -163,10 +163,11 @@ class UnlockOverlayService : Service() {
                     forceStatic = lowBattery,
                     showExistsTime = settings.showExistsTime,
                     words = if (settings.vocabEnabled && !lowBattery) {
-                        app.settings.pickWords()
+                        app.settings.pickWords(settings.vocabCount)
                     } else {
                         emptyList()
-                    }
+                    },
+                    wordTextSizeSp = settings.vocabTextSizeSp
                 ),
                 onToggle = { todo, isDone ->
                     // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位

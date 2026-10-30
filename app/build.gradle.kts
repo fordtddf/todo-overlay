@@ -40,8 +40,8 @@ android {
         applicationId = "com.example.todooverlay"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.6.0"
+        versionCode = 13
+        versionName = "1.6.1"
     }
 
     signingConfigs {

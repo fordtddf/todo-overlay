@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.DisplayMetrics
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.LayoutInflater
@@ -64,7 +65,9 @@ data class OverlayConfig(
     /** 是否显示待办存在时长 */
     val showExistsTime: Boolean,
     /** 本次要展示的六级单词，空表示不显示 */
-    val words: List<Word> = emptyList()
+    val words: List<Word> = emptyList(),
+    /** 单词区字号（sp） */
+    val wordTextSizeSp: Int = 12
 )
 
 /**
@@ -344,6 +347,8 @@ class OverlayManager(context: Context) {
         val container = view.findViewById<LinearLayout>(R.id.container_words)
         val text = view.findViewById<TextView>(R.id.tv_words)
         container.isVisible = true
+        // 字号按用户设定，单位 sp，跟随系统字体缩放
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, config.wordTextSizeSp.toFloat())
         text.text = config.words.joinToString("\n") {
             appContext.getString(R.string.overlay_word_line, it.text, it.meaning)
         }
