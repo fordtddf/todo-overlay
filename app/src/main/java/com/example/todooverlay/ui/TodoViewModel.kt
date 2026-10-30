@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.todooverlay.TodoApp
+import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.SettingsStore
 import com.example.todooverlay.data.Todo
@@ -36,6 +37,15 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val scrollMode: StateFlow<ScrollMode?> = settings.scrollMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val loopExitMode: StateFlow<LoopExitMode?> = settings.loopExitMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val loopMaxTimeSeconds: StateFlow<Int?> = settings.loopMaxTimeSeconds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val loopMaxCount: StateFlow<Int?> = settings.loopMaxCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val scrollSpeed: StateFlow<Int?> = settings.scrollSpeedDpPerSec
@@ -108,6 +118,18 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setScrollSpeed(speedDpPerSec: Int) {
         viewModelScope.launch { settings.setScrollSpeedDpPerSec(speedDpPerSec) }
+    }
+
+    fun setLoopExitMode(mode: LoopExitMode) {
+        viewModelScope.launch { settings.setLoopExitMode(mode) }
+    }
+
+    fun setLoopMaxTimeSeconds(seconds: Int) {
+        viewModelScope.launch { settings.setLoopMaxTimeSeconds(seconds) }
+    }
+
+    fun setLoopMaxCount(count: Int) {
+        viewModelScope.launch { settings.setLoopMaxCount(count) }
     }
 
     fun setCardOpacityPercent(percent: Int) {

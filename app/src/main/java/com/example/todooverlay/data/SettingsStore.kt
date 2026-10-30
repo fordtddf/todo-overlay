@@ -12,6 +12,20 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
+/** 循环模式下什么时候收工 */
+enum class LoopExitMode {
+    /** 按总时长：到点就关 */
+    TIME,
+
+    /** 按轮数：滚够指定轮数后关 */
+    COUNT;
+
+    companion object {
+        fun from(value: String?): LoopExitMode =
+            entries.firstOrNull { it.name == value } ?: TIME
+    }
+}
+
 /** 卡片自动滚动模式 */
 enum class ScrollMode {
     /** 滚到底部停一会儿就淡出关闭 */
@@ -51,6 +65,18 @@ class SettingsStore(private val context: Context) {
         (it[KEY_SCROLL_SPEED] ?: DEFAULT_SPEED).coerceIn(SPEED_MIN, SPEED_MAX)
     }
 
+    val loopExitMode: Flow<LoopExitMode> = prefs.map {
+        LoopExitMode.from(it[KEY_LOOP_EXIT_MODE])
+    }
+
+    val loopMaxTimeSeconds: Flow<Int> = prefs.map {
+        (it[KEY_LOOP_MAX_TIME] ?: DEFAULT_LOOP_TIME).coerceIn(MIN_LOOP_TIME, MAX_LOOP_TIME)
+    }
+
+    val loopMaxCount: Flow<Int> = prefs.map {
+        (it[KEY_LOOP_MAX_COUNT] ?: DEFAULT_LOOP_COUNT).coerceIn(MIN_LOOP_COUNT, MAX_LOOP_COUNT)
+    }
+
     val cardOpacityPercent: Flow<Int> = prefs.map {
         (it[KEY_CARD_OPACITY] ?: DEFAULT_OPACITY_PERCENT)
             .coerceIn(MIN_OPACITY_PERCENT, MAX_OPACITY_PERCENT)
@@ -81,6 +107,19 @@ class SettingsStore(private val context: Context) {
     suspend fun setScrollSpeedDpPerSec(speed: Int) =
         context.dataStore.edit { it[KEY_SCROLL_SPEED] = speed.coerceIn(SPEED_MIN, SPEED_MAX) }
 
+    suspend fun setLoopExitMode(mode: LoopExitMode) =
+        context.dataStore.edit { it[KEY_LOOP_EXIT_MODE] = mode.name }
+
+    suspend fun setLoopMaxTimeSeconds(seconds: Int) =
+        context.dataStore.edit {
+            it[KEY_LOOP_MAX_TIME] = seconds.coerceIn(MIN_LOOP_TIME, MAX_LOOP_TIME)
+        }
+
+    suspend fun setLoopMaxCount(count: Int) =
+        context.dataStore.edit {
+            it[KEY_LOOP_MAX_COUNT] = count.coerceIn(MIN_LOOP_COUNT, MAX_LOOP_COUNT)
+        }
+
     suspend fun setCardOpacityPercent(percent: Int) =
         context.dataStore.edit {
             it[KEY_CARD_OPACITY] = percent.coerceIn(MIN_OPACITY_PERCENT, MAX_OPACITY_PERCENT)
@@ -103,6 +142,11 @@ class SettingsStore(private val context: Context) {
                 .coerceIn(MIN_SECONDS, MAX_SECONDS),
             autoScroll = p[KEY_AUTO_SCROLL] ?: DEFAULT_AUTO_SCROLL,
             scrollMode = ScrollMode.from(p[KEY_SCROLL_MODE]),
+            loopExitMode = LoopExitMode.from(p[KEY_LOOP_EXIT_MODE]),
+            loopMaxTimeSeconds = (p[KEY_LOOP_MAX_TIME] ?: DEFAULT_LOOP_TIME)
+                .coerceIn(MIN_LOOP_TIME, MAX_LOOP_TIME),
+            loopMaxCount = (p[KEY_LOOP_MAX_COUNT] ?: DEFAULT_LOOP_COUNT)
+                .coerceIn(MIN_LOOP_COUNT, MAX_LOOP_COUNT),
             scrollSpeedDpPerSec = (p[KEY_SCROLL_SPEED] ?: DEFAULT_SPEED)
                 .coerceIn(SPEED_MIN, SPEED_MAX),
             cardOpacityPercent = (p[KEY_CARD_OPACITY] ?: DEFAULT_OPACITY_PERCENT)
@@ -119,6 +163,9 @@ class SettingsStore(private val context: Context) {
         val durationSeconds: Int,
         val autoScroll: Boolean,
         val scrollMode: ScrollMode,
+        val loopExitMode: LoopExitMode,
+        val loopMaxTimeSeconds: Int,
+        val loopMaxCount: Int,
         val scrollSpeedDpPerSec: Int,
         val cardOpacityPercent: Int,
         val cardWidthPercent: Int,
@@ -147,6 +194,17 @@ class SettingsStore(private val context: Context) {
         const val MAX_OPACITY_PERCENT = 100
         const val DEFAULT_OPACITY_PERCENT = 100
 
+        /** 循环模式：按时间退出的取值范围 */
+        const val MIN_LOOP_TIME = 10
+        const val MAX_LOOP_TIME = 60
+        const val DEFAULT_LOOP_TIME = 20
+
+        /** 循环模式：按轮数退出的可选项 */
+        const val MIN_LOOP_COUNT = 2
+        const val MAX_LOOP_COUNT = 5
+        const val DEFAULT_LOOP_COUNT = 3
+        val LOOP_COUNT_PRESETS = listOf(2, 3, 5)
+
         const val MIN_WIDTH_PERCENT = 70
         const val MAX_WIDTH_PERCENT = 95
         const val DEFAULT_WIDTH_PERCENT = 90
@@ -167,6 +225,9 @@ class SettingsStore(private val context: Context) {
         private val KEY_DURATION = intPreferencesKey("unlock_overlay_seconds")
         private val KEY_AUTO_SCROLL = booleanPreferencesKey("overlay_auto_scroll")
         private val KEY_SCROLL_MODE = stringPreferencesKey("overlay_scroll_mode")
+        private val KEY_LOOP_EXIT_MODE = stringPreferencesKey("loop_exit_mode")
+        private val KEY_LOOP_MAX_TIME = intPreferencesKey("loop_max_time_seconds")
+        private val KEY_LOOP_MAX_COUNT = intPreferencesKey("loop_max_count")
         private val KEY_SCROLL_SPEED = intPreferencesKey("overlay_scroll_speed")
         private val KEY_CARD_OPACITY = intPreferencesKey("overlay_card_opacity_percent")
         private val KEY_CARD_WIDTH = intPreferencesKey("overlay_card_width_percent")

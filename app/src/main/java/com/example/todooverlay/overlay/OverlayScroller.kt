@@ -5,33 +5,38 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.os.Handler
 import android.os.Looper
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.Interpolator
 import android.view.animation.LinearInterpolator
 import kotlin.math.abs
 
 /**
  * 卡片内部的匀速自动滚动。
  *
- * 只负责「滚」这一件事：顶部停顿 → 匀速下滚 → 底部停顿 →（循环模式下）平滑回滚。
- * 什么时候关闭卡片由 [OverlayManager] 的倒计时决定，这里不碰。
+ * 性能要点（高刷屏不卡顿的关键）：
+ * - 可滚动距离在布局完成后测一次传进来，滚动过程中不再调 getHeight()；
+ * - 每帧只做 `scrollTo()` + 唤醒滚动条，不做 requestLayout / 测量；
+ * - `ValueAnimator.pause()/resume()` 保留动画内部进度，手指松开后从同一像素接着走；
+ * - 全部跑在主线程 Looper 上，不跨线程切协程，避免微卡顿。
  *
- * 用 ValueAnimator + LinearInterpolator 驱动 scrollTo，速度恒定、无跳帧。
+ * 什么时候关闭卡片不归这里管，只通过 [onLoopsFinished] 通知外部。
  */
 class OverlayScroller(
     private val scrollView: MaxHeightScrollView,
+    /** 布局完成后测得的内容高度减去可视高度的差值 */
+    private val scrollableDistance: Int,
     private val speedPxPerSec: Int,
-    private val loop: Boolean
+    private val loop: Boolean,
+    /** 目标轮数；<= 0 表示不限轮数，由外部计时器负责关闭 */
+    private val targetLoops: Int,
+    private val onRoundComplete: (Int) -> Unit,
+    private val onLoopsFinished: () -> Unit
 ) {
 
     private val handler = Handler(Looper.getMainLooper())
     private var animator: ValueAnimator? = null
     private var running = false
-
-    /** 内容超出可视区域的距离；<= 0 表示根本不需要滚动 */
-    val scrollableDistance: Int
-        get() {
-            val content = scrollView.getChildAt(0)?.height ?: 0
-            return (content - scrollView.height).coerceAtLeast(0)
-        }
+    private var completedLoops = 0
 
     fun start() {
         if (running) return
@@ -39,107 +44,160 @@ class OverlayScroller(
         startTopPause()
     }
 
-    /** 手指按下：停掉动画和待执行的停顿，但保留 running，方便之后接着滚 */
+    /** 手指按下：停掉暂停阶段的计时器，冻结动画（保留进度，不销毁） */
     fun pause() {
         handler.removeCallbacksAndMessages(null)
-        val current = animator ?: return
-        animator = null
-        // 先摘监听再 cancel，否则 cancel 会回调 onAnimationEnd 把状态机推错
-        current.removeAllListeners()
-        current.removeAllUpdateListeners()
-        current.cancel()
+        animator?.pause()
     }
 
-    /** 手指抬起后继续：按当前滚动位置决定从哪一阶段接上 */
+    /** 手指抬起：优先从被冻结的那一帧继续，做到像素级接续 */
     fun resume() {
         if (!running) return
-        val max = scrollableDistance
+        val current = animator
+        if (current != null && current.isPaused) {
+            current.resume()
+            return
+        }
+        // 被暂停时正处在顶部/底部停顿阶段，没有动画可恢复：按位置重新接上
         val y = scrollView.scrollY
         when {
             y <= 0 -> startTopPause()
-            y >= max -> onReachedBottom()
-            else -> scrollTo(max)
+            y >= scrollableDistance -> onReachedBottom()
+            else -> scrollToBottom()
         }
     }
 
     fun stop() {
         running = false
-        pause()
+        handler.removeCallbacksAndMessages(null)
+        animator?.let {
+            it.removeAllListeners()
+            it.removeAllUpdateListeners()
+            it.cancel()
+        }
+        animator = null
     }
 
     // ---------------------------------------------------------------- 阶段
 
     private fun startTopPause() {
         if (!running) return
-        handler.postDelayed({ scrollTo(scrollableDistance) }, TOP_PAUSE_MS)
+        handler.postDelayed({ scrollToBottom() }, TOP_PAUSE_MS)
     }
 
-    private fun scrollTo(target: Int) {
+    private fun scrollToBottom() {
         if (!running) return
         val from = scrollView.scrollY
-        if (from == target) {
-            onReached(target)
+        if (scrollableDistance <= from) {
+            onReachedBottom()
             return
         }
-        animate(from, target)
+        val travel = travelDuration(from, scrollableDistance)
+        animateTo(
+            target = scrollableDistance,
+            durationMs = travel,
+            interpolator = softLandingInterpolator(scrollableDistance - from)
+        ) { onReachedBottom() }
     }
 
-    private fun animate(from: Int, to: Int) {
+    private fun scrollToTop() {
+        if (!running) return
+        if (scrollView.scrollY <= 0) {
+            startTopPause()
+            return
+        }
+        // 回顶不能瞬间跳过去，用 400ms 的缓入缓出平滑滚回
+        animateTo(
+            target = 0,
+            durationMs = RETURN_MS,
+            interpolator = AccelerateDecelerateInterpolator()
+        ) { startTopPause() }
+    }
+
+    private fun onReachedBottom() {
+        if (!running) return
+        if (!loop) return // 单遍模式：停在底部，由外部倒计时关闭
+
+        handler.postDelayed({
+            if (!running) return@postDelayed
+            completedLoops++
+            onRoundComplete(completedLoops)
+
+            if (targetLoops > 0 && completedLoops >= targetLoops) {
+                // 达到目标轮数：停在底部，不要再回滚
+                running = false
+                onLoopsFinished()
+            } else {
+                scrollToTop()
+            }
+        }, BOTTOM_PAUSE_MS)
+    }
+
+    // ---------------------------------------------------------------- 动画
+
+    private fun animateTo(
+        target: Int,
+        durationMs: Long,
+        interpolator: Interpolator,
+        onEnd: () -> Unit
+    ) {
         animator?.let {
             it.removeAllListeners()
             it.removeAllUpdateListeners()
             it.cancel()
         }
-        val distance = abs(to - from).coerceAtLeast(1)
-        val durationMs = (distance * 1000L / speedPxPerSec.coerceAtLeast(1))
-            .coerceAtLeast(MIN_ANIM_MS)
 
-        animator = ValueAnimator.ofInt(from, to).apply {
+        val from = scrollView.scrollY.toFloat()
+        animator = ValueAnimator.ofFloat(from, target.toFloat()).apply {
             duration = durationMs
-            interpolator = LinearInterpolator()
-            addUpdateListener { animator ->
-                // 每帧只做两件事：赋值滚动位置、唤醒滚动条。
-                // 绝不能在这里 requestLayout() 或重新 inflate，那会直接掉帧。
-                scrollView.scrollTo(0, animator.animatedValue as Int)
-                // 代码滚动时系统默认不画滚动条，唤醒一下才能看到当前位置
+            this.interpolator = interpolator
+            addUpdateListener { anim ->
+                // 每帧只做位移和滚动条唤醒。任何测量、布局、inflate 都会导致掉帧。
+                scrollView.scrollTo(0, (anim.animatedValue as Float).toInt())
                 scrollView.keepScrollBarAwake()
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    if (running) onReached(to)
+                    animator = null
+                    if (running) onEnd()
                 }
             })
             start()
         }
     }
 
-    private fun onReached(target: Int) {
-        if (!running) return
-        if (target <= 0) {
-            // 回到顶部，循环继续
-            startTopPause()
-        } else {
-            onReachedBottom()
-        }
+    private fun travelDuration(from: Int, to: Int): Long =
+        (abs(to - from) * 1000L / speedPxPerSec.coerceAtLeast(1)).coerceAtLeast(MIN_TRAVEL_MS)
+
+    /**
+     * 前段严格匀速，最后 [SOFT_LANDING_PX] 像素做二次减速，
+     * 避免滚到底部时像撞墙一样急停。
+     */
+    private fun softLandingInterpolator(travelPx: Int): Interpolator {
+        if (travelPx <= SOFT_LANDING_PX) return LinearInterpolator()
+        val easeFraction = (SOFT_LANDING_PX.toFloat() / travelPx).coerceIn(0.02f, 0.25f)
+        return SoftLandingInterpolator(easeFraction)
     }
 
-    private fun onReachedBottom() {
-        if (!running) return
-        if (!loop) {
-            // 单遍模式：停在底部，等外部倒计时把卡片关掉
-            return
+    private class SoftLandingInterpolator(private val easeFraction: Float) : Interpolator {
+        override fun getInterpolation(t: Float): Float {
+            val linearEnd = 1f - easeFraction
+            if (t <= linearEnd) return t
+            val p = (t - linearEnd) / easeFraction
+            val eased = 1f - (1f - p) * (1f - p)
+            return linearEnd + eased * easeFraction
         }
-        handler.postDelayed({ scrollTo(0) }, BOTTOM_PAUSE_MS)
     }
 
     companion object {
         const val TOP_PAUSE_MS = 1500L
         const val BOTTOM_PAUSE_MS = 2000L
 
-        /** 循环模式的最长保护时间，到点无论滚到哪都关闭 */
-        const val LOOP_MAX_MS = 18_000L
+        /** 回滚到顶部的固定时长 */
+        const val RETURN_MS = 400L
 
-        private const val MIN_ANIM_MS = 200L
+        private const val MIN_TRAVEL_MS = 200L
+        private const val SOFT_LANDING_PX = 25
 
         fun travelDurationMs(distancePx: Int, speedPxPerSec: Int): Long =
             distancePx.coerceAtLeast(0).toLong() * 1000L / speedPxPerSec.coerceAtLeast(1)

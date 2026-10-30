@@ -76,6 +76,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.todooverlay.R
 import com.example.todooverlay.TodoApp
+import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.SettingsStore
 import com.example.todooverlay.data.Todo
@@ -416,6 +417,9 @@ private fun SettingsScreen(
     val autoScroll by vm.autoScrollEnabled.collectAsStateWithLifecycle()
     val mode by vm.scrollMode.collectAsStateWithLifecycle()
     val speed by vm.scrollSpeed.collectAsStateWithLifecycle()
+    val loopExit by vm.loopExitMode.collectAsStateWithLifecycle()
+    val loopTime by vm.loopMaxTimeSeconds.collectAsStateWithLifecycle()
+    val loopCount by vm.loopMaxCount.collectAsStateWithLifecycle()
     val opacityPercent by vm.cardOpacityPercent.collectAsStateWithLifecycle()
     val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
     val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
@@ -426,6 +430,9 @@ private fun SettingsScreen(
     val autoScrollOn = autoScroll ?: SettingsStore.DEFAULT_AUTO_SCROLL
     val scrollMode = mode ?: SettingsStore.DEFAULT_SCROLL_MODE
     val speedValue = speed ?: SettingsStore.DEFAULT_SPEED
+    val loopExitMode = loopExit ?: LoopExitMode.TIME
+    val loopSeconds = loopTime ?: SettingsStore.DEFAULT_LOOP_TIME
+    val loopRounds = loopCount ?: SettingsStore.DEFAULT_LOOP_COUNT
     val cardOpacity = opacityPercent ?: SettingsStore.DEFAULT_OPACITY_PERCENT
     val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
     val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
@@ -582,15 +589,67 @@ private fun SettingsScreen(
                             vm.setScrollMode(ScrollMode.LOOP)
                         }
                     }
-                    Text(
-                        if (scrollMode == ScrollMode.SINGLE) {
-                            "滚到底部停顿 2 秒后自动关闭"
+                    if (scrollMode == ScrollMode.SINGLE) {
+                        Text(
+                            "滚到底部停顿 2 秒后自动关闭",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Text(
+                            "退出规则",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ChoiceChip("按时间", loopExitMode == LoopExitMode.TIME) {
+                                vm.setLoopExitMode(LoopExitMode.TIME)
+                            }
+                            ChoiceChip("按轮数", loopExitMode == LoopExitMode.COUNT) {
+                                vm.setLoopExitMode(LoopExitMode.COUNT)
+                            }
+                        }
+
+                        if (loopExitMode == LoopExitMode.TIME) {
+                            var loopTimeSlider by remember(loopSeconds) {
+                                mutableFloatStateOf(loopSeconds.toFloat())
+                            }
+                            Text(
+                                "${loopTimeSlider.roundToInt()} 秒后自动关闭",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = loopTimeSlider,
+                                onValueChange = { loopTimeSlider = it },
+                                onValueChangeFinished = {
+                                    vm.setLoopMaxTimeSeconds(loopTimeSlider.roundToInt())
+                                },
+                                valueRange = SettingsStore.MIN_LOOP_TIME.toFloat()..
+                                    SettingsStore.MAX_LOOP_TIME.toFloat(),
+                                steps = SettingsStore.MAX_LOOP_TIME -
+                                    SettingsStore.MIN_LOOP_TIME - 1
+                            )
+                            Text(
+                                "从弹出算起，达到时间就淡出。手指按住时计时暂停，松开后接着走",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         } else {
-                            "到底部停顿后回滚到顶部继续，最长 18 秒兜底关闭"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SettingsStore.LOOP_COUNT_PRESETS.forEach { rounds ->
+                                    ChoiceChip("$rounds 轮", loopRounds == rounds) {
+                                        vm.setLoopMaxCount(rounds)
+                                    }
+                                }
+                            }
+                            Text(
+                                "从顶部滚到底部计 1 轮；滚够轮数后停在底部关闭，不再回滚",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
                     Text(
                         "滚动速度",

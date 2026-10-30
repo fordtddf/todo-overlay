@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import com.example.todooverlay.R
+import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.Todo
 import kotlin.math.ceil
@@ -32,6 +33,9 @@ data class OverlayConfig(
     val durationSeconds: Int,
     val autoScroll: Boolean,
     val scrollMode: ScrollMode,
+    val loopExitMode: LoopExitMode,
+    val loopMaxTimeSeconds: Int,
+    val loopMaxCount: Int,
     val speedDpPerSec: Int,
     val opacityPercent: Int,
     val widthPercent: Int,
@@ -165,6 +169,10 @@ class OverlayManager(context: Context) {
     private fun applySize(view: View, config: OverlayConfig) {
         val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
         scroll.maxHeight = min(dp(config.maxHeightDp), (screenHeight() * 0.5f).toInt())
+
+        // 开启硬件图层，交给 GPU 合成
+        view.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        scroll.setLayerType(View.LAYER_TYPE_HARDWARE, null)
     }
 
     /**
@@ -199,24 +207,55 @@ class OverlayManager(context: Context) {
      */
     private fun startTimers(view: View, config: OverlayConfig) {
         val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
+        // 距离只在这里测一次，之后整个滚动过程都复用这个值
         val distance = ((scroll.getChildAt(0)?.height ?: 0) - scroll.height).coerceAtLeast(0)
         val speedPx = dp(config.speedDpPerSec)
         val needScroll = config.autoScroll && distance > 0
 
+        val looping = config.scrollMode == ScrollMode.LOOP
+        val byCount = looping && config.loopExitMode == LoopExitMode.COUNT
+
         if (needScroll) {
             scroller = OverlayScroller(
                 scrollView = scroll,
+                scrollableDistance = distance,
                 speedPxPerSec = speedPx,
-                loop = config.scrollMode == ScrollMode.LOOP
+                loop = looping,
+                // 按轮数退出时传目标轮数；按时间退出传 0 表示不限轮
+                targetLoops = if (byCount) config.loopMaxCount else 0,
+                onRoundComplete = { completed ->
+                    updateRoundLabel(view, completed, config.loopMaxCount)
+                },
+                onLoopsFinished = { fadeOut() }
             ).also { it.start() }
         }
 
-        val totalMs = when {
-            !needScroll -> config.durationSeconds * 1000L
-            config.scrollMode == ScrollMode.LOOP -> OverlayScroller.LOOP_MAX_MS
-            else -> OverlayScroller.singlePassTotalMs(distance, speedPx)
+        when {
+            !needScroll -> startCountdown(view, config.durationSeconds * 1000L)
+
+            config.scrollMode == ScrollMode.SINGLE ->
+                startCountdown(view, OverlayScroller.singlePassTotalMs(distance, speedPx))
+
+            config.loopExitMode == LoopExitMode.TIME ->
+                startCountdown(view, config.loopMaxTimeSeconds * 1000L)
+
+            else -> {
+                // 按轮数退出：没有倒计时，顶部文本改成轮数进度
+                view.findViewById<TextView>(R.id.tv_countdown).text =
+                    appContext.getString(R.string.overlay_round_progress, 1, config.loopMaxCount)
+                view.findViewById<ProgressBar>(R.id.progress).progress = 0
+            }
         }
-        startCountdown(view, totalMs)
+    }
+
+    /** 按轮数退出时的顶部进度：已完成的轮数 / 目标轮数 */
+    private fun updateRoundLabel(view: View, completedLoops: Int, target: Int) {
+        val total = target.coerceAtLeast(1)
+        val display = (completedLoops + 1).coerceAtMost(total)
+        view.findViewById<TextView>(R.id.tv_countdown).text =
+            appContext.getString(R.string.overlay_round_progress, display, total)
+        view.findViewById<ProgressBar>(R.id.progress).progress =
+            (completedLoops * 1000 / total).coerceIn(0, 1000)
     }
 
     private fun startCountdown(view: View, totalMs: Long) {

@@ -116,6 +116,9 @@ class UnlockOverlayService : Service() {
                     durationSeconds = settings.durationSeconds,
                     autoScroll = settings.autoScroll,
                     scrollMode = settings.scrollMode,
+                    loopExitMode = settings.loopExitMode,
+                    loopMaxTimeSeconds = settings.loopMaxTimeSeconds,
+                    loopMaxCount = settings.loopMaxCount,
                     speedDpPerSec = settings.scrollSpeedDpPerSec,
                     opacityPercent = settings.cardOpacityPercent,
                     widthPercent = settings.cardWidthPercent,
@@ -217,8 +220,8 @@ class UnlockOverlayService : Service() {
         private const val CHANNEL_ID = "unlock_overlay"
         private const val NOTIFICATION_ID = 1001
 
-        /** 来电轮询次数：500ms 一次，共 25 秒，覆盖循环模式的最长展示时间 */
-        private const val CALL_WATCH_TICKS = 50
+        /** 来电轮询次数：500ms 一次，共 65 秒，覆盖循环模式的最长展示时间（60 秒） */
+        private const val CALL_WATCH_TICKS = 130
 
         const val ACTION_PREVIEW = "com.example.todooverlay.action.PREVIEW"
     }
