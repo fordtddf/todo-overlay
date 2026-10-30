@@ -82,32 +82,42 @@
         android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
         android:scrollbars="vertical">
 
+        <!--
+          ScrollView 只允许一个直接子节点，所以列表、折叠标题、折叠容器
+          必须包在同一个外层 LinearLayout 里。
+        -->
         <LinearLayout
-            android:id="@+id/container_items"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical">
 
-        <!-- 逾期任务折叠区：默认隐藏，点击标题展开 -->
-        <TextView
-            android:id="@+id/tv_overdue_toggle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="false"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp"
-            android:textColor="#80FFFFFF"
-            android:textSize="12sp"
-            android:visibility="gone" />
+            <LinearLayout
+                android:id="@+id/container_items"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
 
-        <LinearLayout
-            android:id="@+id/container_overdue"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone" />
+            <!-- 逾期任务折叠区：默认隐藏，点击标题展开 -->
+            <TextView
+                android:id="@+id/tv_overdue_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="false"
+                android:paddingTop="8dp"
+                android:paddingBottom="4dp"
+                android:textColor="#80FFFFFF"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/container_overdue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone" />
+        </LinearLayout>
     </com.example.todooverlay.overlay.MaxHeightScrollView>
 
     <ProgressBar

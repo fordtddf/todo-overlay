@@ -113,7 +113,6 @@ class OverlayManager(context: Context) {
 
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
         bindContent(view, todos, config, onToggle)
-        bindQuickAdd(view, config, onQuickAdd)
         applyProgress(view, config)
         applySize(view, config)
         applyOpacity(view, config)
@@ -127,6 +126,9 @@ class OverlayManager(context: Context) {
         } catch (t: Throwable) {
             return
         }
+
+        // 必须在 addView 之后：这里要拿到已生效的 LayoutParams 做焦点切换
+        bindQuickAdd(view, config, onQuickAdd)
 
         rootView = view
         currentConfig = config
