@@ -7,11 +7,13 @@ import com.example.todooverlay.TodoApp
 import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.SettingsStore
+import com.example.todooverlay.data.SortMode
 import com.example.todooverlay.data.Todo
 import com.example.todooverlay.data.Today
 import com.example.todooverlay.data.TodoOrdering
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -23,9 +25,17 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = todoApp.settings
 
     /** 主界面列表：与解锁卡片共用 [TodoOrdering]，保证两处顺序一致 */
-    val todos: StateFlow<List<Todo>> = dao.observeAll()
-        .map { TodoOrdering.sorted(it, Today.key()) }
+    val todos: StateFlow<List<Todo>> = combine(
+        dao.observeAll(),
+        settings.sortMode
+    ) { list, mode -> TodoOrdering.sorted(list, Today.key(), mode) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val sortMode: StateFlow<SortMode?> = settings.sortMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val showExistsTime: StateFlow<Boolean?> = settings.showExistsTime
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val overlayEnabled: StateFlow<Boolean?> = settings.overlayEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -62,16 +72,25 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- 待办
 
-    fun add(title: String, isDaily: Boolean) {
+    fun add(title: String, isDaily: Boolean, priority: Int, customOrder: Int?) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            dao.insert(Todo(title = trimmed, isDaily = isDaily, createdAt = now, orderIndex = now))
+            dao.insert(
+                Todo(
+                    title = trimmed,
+                    isDaily = isDaily,
+                    createdAt = now,
+                    orderIndex = now,
+                    priority = priority,
+                    customOrder = customOrder
+                )
+            )
         }
     }
 
-    fun update(todo: Todo, title: String, isDaily: Boolean) {
+    fun update(todo: Todo, title: String, isDaily: Boolean, priority: Int, customOrder: Int?) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
@@ -82,11 +101,21 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
                 todo.copy(
                     title = trimmed,
                     isDaily = isDaily,
+                    priority = priority,
+                    customOrder = customOrder,
                     isCompleted = if (typeChanged) false else todo.isCompleted,
                     lastCompletedDate = if (typeChanged) null else todo.lastCompletedDate
                 )
             )
         }
+    }
+
+    fun setSortMode(mode: SortMode) {
+        viewModelScope.launch { settings.setSortMode(mode) }
+    }
+
+    fun setShowExistsTime(enabled: Boolean) {
+        viewModelScope.launch { settings.setShowExistsTime(enabled) }
     }
 
     fun toggle(todo: Todo) {

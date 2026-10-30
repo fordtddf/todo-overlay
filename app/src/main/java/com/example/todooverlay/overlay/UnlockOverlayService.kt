@@ -117,7 +117,9 @@ class UnlockOverlayService : Service() {
             val todayStart = Today.startMillis()
 
             // 与主界面共用同一个比较器，避免两处排序规则跑偏
-            val pending = TodoOrdering.sorted(dao.pendingForOverlay(today), today)
+            val pending = TodoOrdering.sorted(
+                dao.pendingForOverlay(today), today, settings.sortMode
+            )
 
             val done = dao.todayDone(today, todayStart)
             val total = dao.todayTotal(todayStart)
@@ -158,7 +160,8 @@ class UnlockOverlayService : Service() {
                     progressDone = done,
                     progressTotal = total,
                     // 低电量时强制静态短展示
-                    forceStatic = lowBattery
+                    forceStatic = lowBattery,
+                    showExistsTime = settings.showExistsTime
                 ),
                 onToggle = { todo, isDone ->
                     // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位
@@ -173,9 +176,10 @@ class UnlockOverlayService : Service() {
                 onQuickAdd = { title ->
                     scope.launch {
                         val now = System.currentTimeMillis()
-                        dao.insert(
-                            Todo(title = title, createdAt = now, orderIndex = now)
-                        )
+                        val todo = Todo(title = title, createdAt = now, orderIndex = now)
+                        val id = dao.insert(todo)
+                        // 立刻插进卡片，不用等下次解锁
+                        overlayManager.appendTodo(todo.copy(id = id))
                     }
                 }
             )

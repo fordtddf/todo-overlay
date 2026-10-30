@@ -29,6 +29,7 @@ import androidx.core.view.isVisible
 import com.example.todooverlay.R
 import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
+import com.example.todooverlay.data.TimeFormat
 import com.example.todooverlay.data.Todo
 import kotlin.math.ceil
 import kotlin.math.min
@@ -58,7 +59,9 @@ data class OverlayConfig(
     val progressDone: Int,
     val progressTotal: Int,
     /** 低电量降级：禁用动画，静态展示 */
-    val forceStatic: Boolean
+    val forceStatic: Boolean,
+    /** 是否显示待办存在时长 */
+    val showExistsTime: Boolean
 )
 
 /**
@@ -138,6 +141,22 @@ class OverlayManager(context: Context) {
         view.post {
             if (rootView === view) startTimers(view, config)
         }
+    }
+
+    /**
+     * 快速记一笔后立刻把新条目插进卡片，不用等下次解锁。
+     * 插在列表末尾并同步更新渲染状态。
+     */
+    fun appendTodo(todo: Todo) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { appendTodo(todo) }
+            return
+        }
+        val view = rootView ?: return
+        val container = view.findViewById<LinearLayout>(R.id.container_items) ?: return
+        val inflater = LayoutInflater.from(view.context)
+        addRow(inflater, container, todo, view) { _, _ -> }
+        view.post { refreshScrollRange(view) }
     }
 
     /** 立即淡出。供服务在来电等情况下提前收回卡片。 */
@@ -272,11 +291,29 @@ class OverlayManager(context: Context) {
         val row = inflater.inflate(R.layout.overlay_item, container, false)
         val checkBox = row.findViewById<CheckBox>(R.id.cb_item)
         val label = row.findViewById<TextView>(R.id.tv_item)
+        val strip = row.findViewById<View>(R.id.view_priority)
+        val exists = row.findViewById<TextView>(R.id.tv_exists)
 
-        label.text = if (todo.isDaily) {
-            appContext.getString(R.string.overlay_daily_prefix, todo.title)
+        // 优先级彩条
+        strip.setBackgroundColor(priorityColor(todo.priority))
+
+        // 有自定义序号就加在标题前
+        val prefix = buildString {
+            todo.customOrder?.let { append("#$it ") }
+            if (todo.isDaily) append(appContext.getString(R.string.overlay_daily_tag))
+        }
+        label.text = prefix + todo.title
+
+        // 存在时长
+        val config = currentConfig
+        if (config?.showExistsTime == true) {
+            exists.isVisible = true
+            exists.text = TimeFormat.existsLabel(todo.createdAt, todo.isDaily)
+            if (TimeFormat.isStale(todo.createdAt)) {
+                exists.setTextColor(STALE_COLOR)
+            }
         } else {
-            todo.title
+            exists.isVisible = false
         }
 
         var checked = false
@@ -287,6 +324,14 @@ class OverlayManager(context: Context) {
             onItemToggled(cardView)
         }
         container.addView(row)
+    }
+
+    /** 0 灰 / 1 蓝 / 2 橙 / 3 红 */
+    private fun priorityColor(priority: Int): Int = when (priority) {
+        Todo.PRIORITY_URGENT -> 0xFFEF5350.toInt()
+        Todo.PRIORITY_HIGH -> 0xFFFFB74D.toInt()
+        Todo.PRIORITY_LOW -> 0xFF9E9E9E.toInt()
+        else -> 0xFF64B5F6.toInt()
     }
 
     /** 顶部今日完成进度：3/7 · 42% */
@@ -749,5 +794,8 @@ class OverlayManager(context: Context) {
 
         /** 低电量模式下静态展示的时长 */
         private const val LOW_BATTERY_SHOW_MS = 3000L
+
+        /** 超过 7 天的时长标签用淡橙色弱警示 */
+        private const val STALE_COLOR = 0xFFFFB74D.toInt()
     }
 }

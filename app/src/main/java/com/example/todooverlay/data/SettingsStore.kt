@@ -109,6 +109,10 @@ class SettingsStore(private val context: Context) {
 
     val groupOverdue: Flow<Boolean> = prefs.map { it[KEY_GROUP_OVERDUE] ?: true }
 
+    val sortMode: Flow<SortMode> = prefs.map { SortMode.from(it[KEY_SORT_MODE]) }
+
+    val showExistsTime: Flow<Boolean> = prefs.map { it[KEY_SHOW_EXISTS] ?: true }
+
     val lowBatteryMode: Flow<Boolean> = prefs.map { it[KEY_LOW_BATTERY] ?: true }
 
     val landscapeMute: Flow<Boolean> = prefs.map { it[KEY_LANDSCAPE_MUTE] ?: true }
@@ -142,6 +146,12 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setGroupOverdue(enabled: Boolean) =
         context.dataStore.edit { it[KEY_GROUP_OVERDUE] = enabled }
+
+    suspend fun setSortMode(mode: SortMode) =
+        context.dataStore.edit { it[KEY_SORT_MODE] = mode.name }
+
+    suspend fun setShowExistsTime(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_SHOW_EXISTS] = enabled }
 
     suspend fun setLowBatteryMode(enabled: Boolean) =
         context.dataStore.edit { it[KEY_LOW_BATTERY] = enabled }
@@ -223,7 +233,9 @@ class SettingsStore(private val context: Context) {
             celebrateEnabled = p[KEY_CELEBRATE] ?: true,
             groupOverdue = p[KEY_GROUP_OVERDUE] ?: true,
             lowBatteryMode = p[KEY_LOW_BATTERY] ?: true,
-            landscapeMute = p[KEY_LANDSCAPE_MUTE] ?: true
+            landscapeMute = p[KEY_LANDSCAPE_MUTE] ?: true,
+            sortMode = SortMode.from(p[KEY_SORT_MODE]),
+            showExistsTime = p[KEY_SHOW_EXISTS] ?: true
         )
     }
 
@@ -247,7 +259,9 @@ class SettingsStore(private val context: Context) {
         val celebrateEnabled: Boolean,
         val groupOverdue: Boolean,
         val lowBatteryMode: Boolean,
-        val landscapeMute: Boolean
+        val landscapeMute: Boolean,
+        val sortMode: SortMode,
+        val showExistsTime: Boolean
     )
 
     companion object {
@@ -328,6 +342,8 @@ class SettingsStore(private val context: Context) {
         private val KEY_GROUP_OVERDUE = booleanPreferencesKey("overlay_group_overdue")
         private val KEY_LOW_BATTERY = booleanPreferencesKey("overlay_low_battery_mode")
         private val KEY_LANDSCAPE_MUTE = booleanPreferencesKey("overlay_landscape_mute")
+        private val KEY_SORT_MODE = stringPreferencesKey("todo_sort_mode")
+        private val KEY_SHOW_EXISTS = booleanPreferencesKey("show_exists_time")
         private val KEY_LAST_SHOWN = androidx.datastore.preferences.core.longPreferencesKey(
             "overlay_last_shown_at"
         )

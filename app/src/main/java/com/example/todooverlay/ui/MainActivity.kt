@@ -89,6 +89,10 @@ import com.example.todooverlay.util.PermissionHelper
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import com.example.todooverlay.data.SortMode
+import com.example.todooverlay.data.TimeFormat
 
 class MainActivity : ComponentActivity() {
 
@@ -113,6 +117,8 @@ class MainActivity : ComponentActivity() {
             TodoOverlayTheme {
                 val vm: TodoViewModel = viewModel()
                 val todos by vm.todos.collectAsStateWithLifecycle()
+                val existsTime by vm.showExistsTime.collectAsStateWithLifecycle()
+                val showExists = existsTime ?: true
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -132,7 +138,8 @@ class MainActivity : ComponentActivity() {
                             onEdit = vm::update,
                             onToggle = vm::toggle,
                             onDelete = vm::delete,
-                            onOpenSettings = { showSettings = true }
+                            onOpenSettings = { showSettings = true },
+                            showExistsTime = showExists
                         )
                     }
                 }
@@ -159,11 +166,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun TodoScreen(
     todos: List<Todo>,
-    onAdd: (String, Boolean) -> Unit,
-    onEdit: (Todo, String, Boolean) -> Unit,
+    onAdd: (String, Boolean, Int, Int?) -> Unit,
+    onEdit: (Todo, String, Boolean, Int, Int?) -> Unit,
     onToggle: (Todo) -> Unit,
     onDelete: (Todo) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    showExistsTime: Boolean
 ) {
     val today = Today.key()
     val pending = todos.count { !it.isDoneOn(today) }
@@ -227,6 +235,7 @@ private fun TodoScreen(
                 TodoRow(
                     todo = todo,
                     done = todo.isDoneOn(today),
+                    showExists = showExistsTime,
                     onToggle = { onToggle(todo) },
                     onEdit = { editor = TodoEditorState(todo) },
                     onDelete = { onDelete(todo) }
@@ -239,9 +248,10 @@ private fun TodoScreen(
         TodoEditorDialog(
             state = state,
             onDismiss = { editor = null },
-            onConfirm = { title, daily ->
+            onConfirm = { title, daily, priority, order ->
                 val target = state.todo
-                if (target == null) onAdd(title, daily) else onEdit(target, title, daily)
+                if (target == null) onAdd(title, daily, priority, order)
+                else onEdit(target, title, daily, priority, order)
                 editor = null
             }
         )
@@ -255,10 +265,12 @@ private data class TodoEditorState(val todo: Todo?)
 private fun TodoEditorDialog(
     state: TodoEditorState,
     onDismiss: () -> Unit,
-    onConfirm: (String, Boolean) -> Unit
+    onConfirm: (String, Boolean, Int, Int?) -> Unit
 ) {
     var title by remember(state) { mutableStateOf(state.todo?.title.orEmpty()) }
     var daily by remember(state) { mutableStateOf(state.todo?.isDaily ?: false) }
+    var priority by remember(state) { mutableStateOf(state.todo?.priority ?: Todo.PRIORITY_MEDIUM) }
+    var orderText by remember(state) { mutableStateOf(state.todo?.customOrder?.toString() ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -293,11 +305,47 @@ private fun TodoEditorDialog(
                     }
                     Switch(checked = daily, onCheckedChange = { daily = it })
                 }
+
+                Spacer(Modifier.height(16.dp))
+                Text("重要性", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PriorityChip("低", Todo.PRIORITY_LOW, priority) { priority = it }
+                    PriorityChip("中", Todo.PRIORITY_MEDIUM, priority) { priority = it }
+                    PriorityChip("高", Todo.PRIORITY_HIGH, priority) { priority = it }
+                    PriorityChip("紧急", Todo.PRIORITY_URGENT, priority) { priority = it }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text("序号（选填）", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = orderText,
+                        onValueChange = { text ->
+                            // 只允许数字，最长 3 位，避免误输入
+                            orderText = text.filter { it.isDigit() }.take(3)
+                        },
+                        singleLine = true,
+                        placeholder = { Text("如 1、2、3") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        val current = orderText.toIntOrNull() ?: 0
+                        orderText = (current - 1).coerceAtLeast(1).toString()
+                    }) { Text("−") }
+                    TextButton(onClick = {
+                        val current = orderText.toIntOrNull() ?: 0
+                        orderText = (current + 1).coerceAtMost(999).toString()
+                    }) { Text("+") }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(title, daily) },
+                onClick = { onConfirm(title, daily, priority, orderText.toIntOrNull()) },
                 enabled = title.isNotBlank()
             ) { Text(stringResource(R.string.action_save)) }
         },
@@ -311,6 +359,7 @@ private fun TodoEditorDialog(
 private fun TodoRow(
     todo: Todo,
     done: Boolean,
+    showExists: Boolean,
     onToggle: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -326,6 +375,16 @@ private fun TodoRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 重要性彩条
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(20.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(priorityColor(todo.priority))
+            )
+            Spacer(Modifier.width(8.dp))
+
             IconButton(onClick = onToggle, modifier = Modifier.size(36.dp)) {
                 val checkColor by animateColorAsState(
                     if (done) MaterialTheme.colorScheme.primary
@@ -366,13 +425,25 @@ private fun TodoRow(
                     .clickable(onClick = onEdit)
                     .padding(horizontal = 8.dp)
             ) {
+                val titlePrefix = todo.customOrder?.let { "#$it " } ?: ""
                 Text(
-                    text = todo.title,
+                    text = titlePrefix + todo.title,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (done) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.onSurface,
                     textDecoration = if (done) TextDecoration.LineThrough else null
                 )
+                if (showExists) {
+                    Text(
+                        text = TimeFormat.existsLabel(todo.createdAt, todo.isDaily),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (TimeFormat.isStale(todo.createdAt)) {
+                            priorityColor(Todo.PRIORITY_HIGH)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
                 if (todo.isDaily) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -429,6 +500,8 @@ private fun SettingsScreen(
     val overdue by vm.groupOverdue.collectAsStateWithLifecycle()
     val lowBattery by vm.lowBatteryMode.collectAsStateWithLifecycle()
     val landscape by vm.landscapeMute.collectAsStateWithLifecycle()
+    val sortMode by vm.sortMode.collectAsStateWithLifecycle()
+    val existsTime by vm.showExistsTime.collectAsStateWithLifecycle()
     val opacityPercent by vm.cardOpacityPercent.collectAsStateWithLifecycle()
     val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
     val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
@@ -451,6 +524,8 @@ private fun SettingsScreen(
     val overdueOn = overdue ?: true
     val lowBatteryOn = lowBattery ?: true
     val landscapeOn = landscape ?: true
+    val sortModeValue = sortMode ?: SortMode.PRIORITY
+    val existsTimeOn = existsTime ?: true
     val cardOpacity = opacityPercent ?: SettingsStore.DEFAULT_OPACITY_PERCENT
     val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
     val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
@@ -977,6 +1052,35 @@ private fun SettingsScreen(
                 )
             }
 
+            // ---------------- 显示偏好 ----------------
+            SectionHeader("显示偏好")
+            SettingCard {
+                Text("排序方式", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChip("重要性优先", sortModeValue == SortMode.PRIORITY) {
+                        vm.setSortMode(SortMode.PRIORITY)
+                    }
+                    ChoiceChip("序号优先", sortModeValue == SortMode.CUSTOM_ORDER) {
+                        vm.setSortMode(SortMode.CUSTOM_ORDER)
+                    }
+                }
+                Text(
+                    if (sortModeValue == SortMode.PRIORITY) {
+                        "紧急 > 高 > 中 > 低；同级别按序号、再按创建时间"
+                    } else {
+                        "填了序号的按数字排；没填的按重要性与创建时间"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ToggleRow(
+                    title = "显示待办存在时长",
+                    desc = "在条目上显示「已搁置 3 天」这类标签",
+                    checked = existsTimeOn,
+                    onChange = vm::setShowExistsTime
+                )
+            }
+
             // ---------------- 进阶显示 ----------------
             SectionHeader("进阶显示")
             SettingCard {
@@ -1034,6 +1138,31 @@ private fun appVersionName(context: Context): String = try {
     "${info.versionName} (${info.longVersionCode})"
 } catch (t: Throwable) {
     "未知"
+}
+
+@Composable
+private fun PriorityChip(label: String, value: Int, selected: Int, onSelect: (Int) -> Unit) {
+    val color = priorityColor(value)
+    FilterChip(
+        selected = selected == value,
+        onClick = { onSelect(value) },
+        label = { Text(label) },
+        leadingIcon = {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(color)
+            )
+        }
+    )
+}
+
+private fun priorityColor(priority: Int): androidx.compose.ui.graphics.Color = when (priority) {
+    Todo.PRIORITY_URGENT -> androidx.compose.ui.graphics.Color(0xFFEF5350)
+    Todo.PRIORITY_HIGH -> androidx.compose.ui.graphics.Color(0xFFFFB74D)
+    Todo.PRIORITY_LOW -> androidx.compose.ui.graphics.Color(0xFF9E9E9E)
+    else -> androidx.compose.ui.graphics.Color(0xFF64B5F6)
 }
 
 @Composable

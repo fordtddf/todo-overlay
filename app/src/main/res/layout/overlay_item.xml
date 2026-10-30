@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  卡片里的单条待办：复选框 + 文字。
-  CheckBox 自身不接收点击（clickable/focusable 都为 false），
-  整行的点击交给外层 LinearLayout 处理，点哪都能勾上。
+  卡片里的单条待办：优先级彩条 + 复选框 + 标题 + 序号/时长角标。
+  CheckBox 自身不接收点击，整行点击交给外层 LinearLayout。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/row_item"
@@ -15,6 +14,14 @@
     android:orientation="horizontal"
     android:paddingTop="4dp"
     android:paddingBottom="4dp">
+
+    <!-- 重要性彩条：0 灰 / 1 蓝 / 2 橙 / 3 红，颜色在代码里设置 -->
+    <View
+        android:id="@+id/view_priority"
+        android:layout_width="3dp"
+        android:layout_height="16dp"
+        android:layout_marginEnd="8dp"
+        android:background="#64B5F6" />
 
     <CheckBox
         android:id="@+id/cb_item"
@@ -37,5 +44,15 @@
         android:maxLines="1"
         android:textColor="#E6FFFFFF"
         android:textSize="14sp" />
+
+    <!-- 存在时长，弱化显示 -->
+    <TextView
+        android:id="@+id/tv_exists"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:textColor="#73FFFFFF"
+        android:textSize="11sp"
+        android:visibility="gone" />
 
 </LinearLayout>

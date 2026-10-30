@@ -34,7 +34,15 @@ data class Todo(
 
     /** 自定义权重，值越小越靠前。默认取创建时刻，等于「先建先显示」 */
     @ColumnInfo(name = "order_index")
-    val orderIndex: Long = System.currentTimeMillis()
+    val orderIndex: Long = System.currentTimeMillis(),
+
+    /** 重要性：0 低 / 1 中（默认）/ 2 高 / 3 紧急 */
+    @ColumnInfo(name = "priority")
+    val priority: Int = PRIORITY_MEDIUM,
+
+    /** 用户自填序号，null 表示没填 */
+    @ColumnInfo(name = "custom_order")
+    val customOrder: Int? = null
 ) {
 
     /**
@@ -51,4 +59,13 @@ data class Todo(
         } else {
             copy(isCompleted = !isCompleted)
         }
+
+    companion object {
+        const val PRIORITY_LOW = 0
+        const val PRIORITY_MEDIUM = 1
+        const val PRIORITY_HIGH = 2
+        const val PRIORITY_URGENT = 3
+
+        val PRIORITY_RANGE = PRIORITY_LOW..PRIORITY_URGENT
+    }
 }
