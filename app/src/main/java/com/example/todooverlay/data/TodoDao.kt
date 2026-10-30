@@ -33,6 +33,25 @@ interface TodoDao {
     )
     suspend fun pendingForOverlay(today: String): List<Todo>
 
+    /** 今日任务总数与已完成数，用于卡片顶部进度 */
+    @Query(
+        """
+        SELECT COUNT(*) FROM todos
+        WHERE is_daily = 1
+           OR (is_daily = 0 AND created_at >= :todayStart)
+        """
+    )
+    suspend fun todayTotal(todayStart: Long): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM todos
+        WHERE (is_daily = 1 AND last_completed_date = :today)
+           OR (is_daily = 0 AND is_completed = 1 AND created_at >= :todayStart)
+        """
+    )
+    suspend fun todayDone(today: String, todayStart: Long): Int
+
     @Insert
     suspend fun insert(todo: Todo): Long
 

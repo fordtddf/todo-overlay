@@ -7,14 +7,18 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.media.AudioManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.todooverlay.R
 import com.example.todooverlay.TodoApp
+import com.example.todooverlay.data.SettingsStore
 import com.example.todooverlay.data.Today
+import com.example.todooverlay.data.Todo
 import com.example.todooverlay.data.TodoOrdering
 import com.example.todooverlay.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -102,19 +106,42 @@ class UnlockOverlayService : Service() {
             // 比申请 READ_PHONE_STATE 轻得多
             if (isInCall()) return@launch
 
+            // 横屏（游戏、视频）静默
+            if (settings.landscapeMute && isLandscape()) return@launch
+
+            // 低电量：完全静默，连庆祝卡片也不弹
+            val lowBattery = settings.lowBatteryMode && isBatteryLow()
+
             val dao = app.database.todoDao()
             val today = Today.key()
+            val todayStart = Today.startMillis()
+
             // 与主界面共用同一个比较器，避免两处排序规则跑偏
             val pending = TodoOrdering.sorted(dao.pendingForOverlay(today), today)
 
-            // 没有未完成事项就不打扰
-            if (pending.isEmpty()) return@launch
+            val done = dao.todayDone(today, todayStart)
+            val total = dao.todayTotal(todayStart)
+
+            // 全部完成：按设置弹祝贺卡片或静默
+            if (pending.isEmpty()) {
+                if (settings.celebrateEnabled && !lowBattery) {
+                    showCelebration(settings, done, total)
+                }
+                return@launch
+            }
+
+            // 高频解锁冷却：上次弹出后短时间内不再打扰
+            if (settings.cooldownEnabled) {
+                val last = app.settings.lastShownAt()
+                val cooldownMs = settings.cooldownMinutes * 60_000L
+                if (System.currentTimeMillis() - last < cooldownMs) return@launch
+            }
 
             overlayManager.show(
                 todos = pending,
                 config = OverlayConfig(
                     durationSeconds = settings.durationSeconds,
-                    autoScroll = settings.autoScroll,
+                    autoScroll = settings.autoScroll && !lowBattery,
                     scrollMode = settings.scrollMode,
                     loopExitMode = settings.loopExitMode,
                     loopMaxTimeSeconds = settings.loopMaxTimeSeconds,
@@ -122,20 +149,62 @@ class UnlockOverlayService : Service() {
                     speedDpPerSec = settings.scrollSpeedDpPerSec,
                     opacityPercent = settings.cardOpacityPercent,
                     widthPercent = settings.cardWidthPercent,
-                    maxHeightDp = settings.cardMaxHeightDp
-                )
-            ) { todo, done ->
-                // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位
-                scope.launch {
-                    if (todo.isDaily) {
-                        dao.setLastCompletedDate(todo.id, if (done) today else null)
-                    } else {
-                        dao.setCompleted(todo.id, done)
+                    maxHeightDp = settings.cardMaxHeightDp,
+                    flingToDismiss = settings.flingToDismiss,
+                    quickAddEnabled = settings.quickAddEnabled,
+                    showProgress = settings.showProgress,
+                    groupOverdue = settings.groupOverdue,
+                    todayStart = todayStart,
+                    progressDone = done,
+                    progressTotal = total,
+                    // 低电量时强制静态短展示
+                    forceStatic = lowBattery
+                ),
+                onToggle = { todo, isDone ->
+                    // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位
+                    scope.launch {
+                        if (todo.isDaily) {
+                            dao.setLastCompletedDate(todo.id, if (isDone) today else null)
+                        } else {
+                            dao.setCompleted(todo.id, isDone)
+                        }
+                    }
+                },
+                onQuickAdd = { title ->
+                    scope.launch {
+                        val now = System.currentTimeMillis()
+                        dao.insert(
+                            Todo(title = title, createdAt = now, orderIndex = now)
+                        )
                     }
                 }
-            }
+            )
+
+            app.settings.setLastShownAt(System.currentTimeMillis())
             watchForIncomingCall()
         }
+    }
+
+    private fun showCelebration(settings: com.example.todooverlay.data.SettingsStore.Snapshot,
+                                done: Int, total: Int) {
+        overlayManager.showCelebration(
+            done = done,
+            total = total,
+            durationSeconds = CELEBRATION_SECONDS,
+            widthPercent = settings.cardWidthPercent,
+            opacityPercent = settings.cardOpacityPercent
+        )
+    }
+
+    /** 横屏判断：用 Configuration 而不是 Display.getRotation，不依赖传感器 */
+    private fun isLandscape(): Boolean =
+        resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    /** 低电量判断。BatteryManager 不需要任何权限 */
+    private fun isBatteryLow(): Boolean {
+        val bm = getSystemService(BatteryManager::class.java) ?: return false
+        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return level in 0..SettingsStore.LOW_BATTERY_THRESHOLD
     }
 
     /**
@@ -222,6 +291,9 @@ class UnlockOverlayService : Service() {
 
         /** 来电轮询次数：500ms 一次，共 65 秒，覆盖循环模式的最长展示时间（60 秒） */
         private const val CALL_WATCH_TICKS = 130
+
+        /** 祝贺气泡停留秒数 */
+        private const val CELEBRATION_SECONDS = 2
 
         const val ACTION_PREVIEW = "com.example.todooverlay.action.PREVIEW"
     }

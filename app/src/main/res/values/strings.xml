@@ -15,6 +15,12 @@
     <string name="overlay_daily_prefix">每日 · %1$s</string>
     <string name="overlay_close">关闭卡片</string>
     <string name="overlay_round_progress">%1$d/%2$d 轮</string>
+    <string name="overlay_today_progress">%1$d/%2$d · %3$d%%</string>
+    <string name="overlay_overdue_toggle">还有 %1$d 项往日待办 ▾</string>
+    <string name="overlay_overdue_collapse">收起往日待办 ▴</string>
+    <string name="overlay_quick_add">+ 快速记一笔</string>
+    <string name="overlay_quick_add_hint">要做什么？回车即保存</string>
+    <string name="overlay_celebration">🎉 今日待办全部搞定，尽情享受吧！</string>
 
     <!-- 列表页 -->
     <string name="todo_add_title">添加待办</string>

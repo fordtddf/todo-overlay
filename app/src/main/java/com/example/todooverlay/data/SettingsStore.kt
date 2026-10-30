@@ -90,6 +90,65 @@ class SettingsStore(private val context: Context) {
         (it[KEY_CARD_HEIGHT] ?: DEFAULT_HEIGHT_DP).coerceIn(MIN_HEIGHT_DP, MAX_HEIGHT_DP)
     }
 
+    // ---------------------------------------------------------------- 进阶开关
+
+    val flingToDismiss: Flow<Boolean> = prefs.map { it[KEY_FLING_DISMISS] ?: false }
+
+    val cooldownEnabled: Flow<Boolean> = prefs.map { it[KEY_COOLDOWN] ?: false }
+
+    val cooldownMinutes: Flow<Int> = prefs.map {
+        (it[KEY_COOLDOWN_MINUTES] ?: DEFAULT_COOLDOWN_MINUTES)
+            .coerceIn(MIN_COOLDOWN_MINUTES, MAX_COOLDOWN_MINUTES)
+    }
+
+    val quickAddEnabled: Flow<Boolean> = prefs.map { it[KEY_QUICK_ADD] ?: false }
+
+    val showProgress: Flow<Boolean> = prefs.map { it[KEY_SHOW_PROGRESS] ?: true }
+
+    val celebrateEnabled: Flow<Boolean> = prefs.map { it[KEY_CELEBRATE] ?: true }
+
+    val groupOverdue: Flow<Boolean> = prefs.map { it[KEY_GROUP_OVERDUE] ?: true }
+
+    val lowBatteryMode: Flow<Boolean> = prefs.map { it[KEY_LOW_BATTERY] ?: true }
+
+    val landscapeMute: Flow<Boolean> = prefs.map { it[KEY_LANDSCAPE_MUTE] ?: true }
+
+    /** 上次弹窗时间，用于冷却判断。存在 DataStore 里，进程被杀也有效 */
+    suspend fun lastShownAt(): Long =
+        context.dataStore.data.first()[KEY_LAST_SHOWN] ?: 0L
+
+    suspend fun setLastShownAt(timestamp: Long) =
+        context.dataStore.edit { it[KEY_LAST_SHOWN] = timestamp }
+
+    suspend fun setFlingToDismiss(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_FLING_DISMISS] = enabled }
+
+    suspend fun setCooldownEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_COOLDOWN] = enabled }
+
+    suspend fun setCooldownMinutes(minutes: Int) =
+        context.dataStore.edit {
+            it[KEY_COOLDOWN_MINUTES] = minutes.coerceIn(MIN_COOLDOWN_MINUTES, MAX_COOLDOWN_MINUTES)
+        }
+
+    suspend fun setQuickAddEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_QUICK_ADD] = enabled }
+
+    suspend fun setShowProgress(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_SHOW_PROGRESS] = enabled }
+
+    suspend fun setCelebrateEnabled(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_CELEBRATE] = enabled }
+
+    suspend fun setGroupOverdue(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_GROUP_OVERDUE] = enabled }
+
+    suspend fun setLowBatteryMode(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_LOW_BATTERY] = enabled }
+
+    suspend fun setLandscapeMute(enabled: Boolean) =
+        context.dataStore.edit { it[KEY_LANDSCAPE_MUTE] = enabled }
+
     suspend fun setOverlayEnabled(enabled: Boolean) =
         context.dataStore.edit { it[KEY_ENABLED] = enabled }
 
@@ -154,7 +213,17 @@ class SettingsStore(private val context: Context) {
             cardWidthPercent = (p[KEY_CARD_WIDTH] ?: DEFAULT_WIDTH_PERCENT)
                 .coerceIn(MIN_WIDTH_PERCENT, MAX_WIDTH_PERCENT),
             cardMaxHeightDp = (p[KEY_CARD_HEIGHT] ?: DEFAULT_HEIGHT_DP)
-                .coerceIn(MIN_HEIGHT_DP, MAX_HEIGHT_DP)
+                .coerceIn(MIN_HEIGHT_DP, MAX_HEIGHT_DP),
+            flingToDismiss = p[KEY_FLING_DISMISS] ?: false,
+            cooldownEnabled = p[KEY_COOLDOWN] ?: false,
+            cooldownMinutes = (p[KEY_COOLDOWN_MINUTES] ?: DEFAULT_COOLDOWN_MINUTES)
+                .coerceIn(MIN_COOLDOWN_MINUTES, MAX_COOLDOWN_MINUTES),
+            quickAddEnabled = p[KEY_QUICK_ADD] ?: false,
+            showProgress = p[KEY_SHOW_PROGRESS] ?: true,
+            celebrateEnabled = p[KEY_CELEBRATE] ?: true,
+            groupOverdue = p[KEY_GROUP_OVERDUE] ?: true,
+            lowBatteryMode = p[KEY_LOW_BATTERY] ?: true,
+            landscapeMute = p[KEY_LANDSCAPE_MUTE] ?: true
         )
     }
 
@@ -169,7 +238,16 @@ class SettingsStore(private val context: Context) {
         val scrollSpeedDpPerSec: Int,
         val cardOpacityPercent: Int,
         val cardWidthPercent: Int,
-        val cardMaxHeightDp: Int
+        val cardMaxHeightDp: Int,
+        val flingToDismiss: Boolean,
+        val cooldownEnabled: Boolean,
+        val cooldownMinutes: Int,
+        val quickAddEnabled: Boolean,
+        val showProgress: Boolean,
+        val celebrateEnabled: Boolean,
+        val groupOverdue: Boolean,
+        val lowBatteryMode: Boolean,
+        val landscapeMute: Boolean
     )
 
     companion object {
@@ -205,6 +283,14 @@ class SettingsStore(private val context: Context) {
         const val DEFAULT_LOOP_COUNT = 3
         val LOOP_COUNT_PRESETS = listOf(2, 3, 5)
 
+        /** 高频解锁冷却：1~10 分钟，默认 3 分钟 */
+        const val MIN_COOLDOWN_MINUTES = 1
+        const val MAX_COOLDOWN_MINUTES = 10
+        const val DEFAULT_COOLDOWN_MINUTES = 3
+
+        /** 低电量阈值 */
+        const val LOW_BATTERY_THRESHOLD = 20
+
         const val MIN_WIDTH_PERCENT = 70
         const val MAX_WIDTH_PERCENT = 95
         const val DEFAULT_WIDTH_PERCENT = 90
@@ -232,5 +318,18 @@ class SettingsStore(private val context: Context) {
         private val KEY_CARD_OPACITY = intPreferencesKey("overlay_card_opacity_percent")
         private val KEY_CARD_WIDTH = intPreferencesKey("overlay_card_width_percent")
         private val KEY_CARD_HEIGHT = intPreferencesKey("overlay_card_max_height_dp")
+
+        private val KEY_FLING_DISMISS = booleanPreferencesKey("overlay_fling_dismiss")
+        private val KEY_COOLDOWN = booleanPreferencesKey("overlay_cooldown_enabled")
+        private val KEY_COOLDOWN_MINUTES = intPreferencesKey("overlay_cooldown_minutes")
+        private val KEY_QUICK_ADD = booleanPreferencesKey("overlay_quick_add")
+        private val KEY_SHOW_PROGRESS = booleanPreferencesKey("overlay_show_progress")
+        private val KEY_CELEBRATE = booleanPreferencesKey("overlay_celebrate")
+        private val KEY_GROUP_OVERDUE = booleanPreferencesKey("overlay_group_overdue")
+        private val KEY_LOW_BATTERY = booleanPreferencesKey("overlay_low_battery_mode")
+        private val KEY_LANDSCAPE_MUTE = booleanPreferencesKey("overlay_landscape_mute")
+        private val KEY_LAST_SHOWN = androidx.datastore.preferences.core.longPreferencesKey(
+            "overlay_last_shown_at"
+        )
     }
 }

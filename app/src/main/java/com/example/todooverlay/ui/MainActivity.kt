@@ -420,6 +420,15 @@ private fun SettingsScreen(
     val loopExit by vm.loopExitMode.collectAsStateWithLifecycle()
     val loopTime by vm.loopMaxTimeSeconds.collectAsStateWithLifecycle()
     val loopCount by vm.loopMaxCount.collectAsStateWithLifecycle()
+    val fling by vm.flingToDismiss.collectAsStateWithLifecycle()
+    val cooldown by vm.cooldownEnabled.collectAsStateWithLifecycle()
+    val cooldownMin by vm.cooldownMinutes.collectAsStateWithLifecycle()
+    val quickAdd by vm.quickAddEnabled.collectAsStateWithLifecycle()
+    val progress by vm.showProgress.collectAsStateWithLifecycle()
+    val celebrate by vm.celebrateEnabled.collectAsStateWithLifecycle()
+    val overdue by vm.groupOverdue.collectAsStateWithLifecycle()
+    val lowBattery by vm.lowBatteryMode.collectAsStateWithLifecycle()
+    val landscape by vm.landscapeMute.collectAsStateWithLifecycle()
     val opacityPercent by vm.cardOpacityPercent.collectAsStateWithLifecycle()
     val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
     val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
@@ -433,6 +442,15 @@ private fun SettingsScreen(
     val loopExitMode = loopExit ?: LoopExitMode.TIME
     val loopSeconds = loopTime ?: SettingsStore.DEFAULT_LOOP_TIME
     val loopRounds = loopCount ?: SettingsStore.DEFAULT_LOOP_COUNT
+    val flingOn = fling ?: false
+    val cooldownOn = cooldown ?: false
+    val cooldownVal = cooldownMin ?: SettingsStore.DEFAULT_COOLDOWN_MINUTES
+    val quickAddOn = quickAdd ?: false
+    val progressOn = progress ?: true
+    val celebrateOn = celebrate ?: true
+    val overdueOn = overdue ?: true
+    val lowBatteryOn = lowBattery ?: true
+    val landscapeOn = landscape ?: true
     val cardOpacity = opacityPercent ?: SettingsStore.DEFAULT_OPACITY_PERCENT
     val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
     val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
@@ -915,6 +933,90 @@ private fun SettingsScreen(
                 }
             }
 
+            // ---------------- 交互手势 ----------------
+            SectionHeader("交互手势")
+            SettingCard {
+                ToggleRow(
+                    title = "上滑关闭卡片",
+                    desc = "在卡片上快速向上轻扫即可立即关闭",
+                    checked = flingOn,
+                    onChange = vm::setFlingToDismiss
+                )
+                ToggleRow(
+                    title = "高频解锁冷却",
+                    desc = "刚弹过之后短时间内再解锁不再打扰",
+                    checked = cooldownOn,
+                    onChange = vm::setCooldownEnabled
+                )
+                if (cooldownOn) {
+                    var cooldownSlider by remember(cooldownVal) {
+                        mutableFloatStateOf(cooldownVal.toFloat())
+                    }
+                    Text(
+                        "冷却 ${cooldownSlider.roundToInt()} 分钟",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    Slider(
+                        value = cooldownSlider,
+                        onValueChange = { cooldownSlider = it },
+                        onValueChangeFinished = {
+                            vm.setCooldownMinutes(cooldownSlider.roundToInt())
+                        },
+                        valueRange = SettingsStore.MIN_COOLDOWN_MINUTES.toFloat()..
+                            SettingsStore.MAX_COOLDOWN_MINUTES.toFloat(),
+                        steps = SettingsStore.MAX_COOLDOWN_MINUTES -
+                            SettingsStore.MIN_COOLDOWN_MINUTES - 1
+                    )
+                }
+                ToggleRow(
+                    title = "卡片内快速记一笔",
+                    desc = "卡片底部提供输入入口，回车即存为单次任务",
+                    checked = quickAddOn,
+                    onChange = vm::setQuickAddEnabled
+                )
+            }
+
+            // ---------------- 进阶显示 ----------------
+            SectionHeader("进阶显示")
+            SettingCard {
+                ToggleRow(
+                    title = "今日完成进度",
+                    desc = "顶部显示 3/7 · 42% 这样的进度",
+                    checked = progressOn,
+                    onChange = vm::setShowProgress
+                )
+                ToggleRow(
+                    title = "全部完成祝贺",
+                    desc = "今日任务全做完时弹一个祝贺气泡；关闭则静默",
+                    checked = celebrateOn,
+                    onChange = vm::setCelebrateEnabled
+                )
+                ToggleRow(
+                    title = "逾期任务折叠",
+                    desc = "往日未完成的任务收进折叠栏，不占今日视野",
+                    checked = overdueOn,
+                    onChange = vm::setGroupOverdue
+                )
+            }
+
+            // ---------------- 情境与电量保护 ----------------
+            SectionHeader("情境与电量保护")
+            SettingCard {
+                ToggleRow(
+                    title = "低电量省电模式",
+                    desc = "电量低于 ${SettingsStore.LOW_BATTERY_THRESHOLD}% 时不做动画，静态展示 3 秒",
+                    checked = lowBatteryOn,
+                    onChange = vm::setLowBatteryMode
+                )
+                ToggleRow(
+                    title = "横屏免打扰",
+                    desc = "横屏（游戏、视频）时解锁不弹卡片",
+                    checked = landscapeOn,
+                    onChange = vm::setLandscapeMute
+                )
+            }
+
             TextButton(onClick = onBack) { Text("返回待办") }
 
             // 装上之后一眼就能确认是哪个版本，避免"改了却没装上去"这种排查黑洞
@@ -932,6 +1034,41 @@ private fun appVersionName(context: Context): String = try {
     "${info.versionName} (${info.longVersionCode})"
 } catch (t: Throwable) {
     "未知"
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+    )
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    desc: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
 }
 
 @Composable

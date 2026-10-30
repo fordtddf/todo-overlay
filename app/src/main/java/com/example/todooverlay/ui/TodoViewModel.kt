@@ -98,6 +98,55 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { dao.delete(todo) }
     }
 
+    // ---------------------------------------------------------------- 进阶开关
+
+    val flingToDismiss: StateFlow<Boolean?> = settings.flingToDismiss
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val cooldownEnabled: StateFlow<Boolean?> = settings.cooldownEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val cooldownMinutes: StateFlow<Int?> = settings.cooldownMinutes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val quickAddEnabled: StateFlow<Boolean?> = settings.quickAddEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val showProgress: StateFlow<Boolean?> = settings.showProgress
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val celebrateEnabled: StateFlow<Boolean?> = settings.celebrateEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val groupOverdue: StateFlow<Boolean?> = settings.groupOverdue
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val lowBatteryMode: StateFlow<Boolean?> = settings.lowBatteryMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val landscapeMute: StateFlow<Boolean?> = settings.landscapeMute
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun setFlingToDismiss(enabled: Boolean) {
+        viewModelScope.launch { settings.setFlingToDismiss(enabled) }
+    }
+    fun setCooldownEnabled(enabled: Boolean) {
+        viewModelScope.launch { settings.setCooldownEnabled(enabled) }
+    }
+    fun setCooldownMinutes(minutes: Int) {
+        viewModelScope.launch { settings.setCooldownMinutes(minutes) }
+    }
+    fun setQuickAddEnabled(enabled: Boolean) {
+        viewModelScope.launch { settings.setQuickAddEnabled(enabled) }
+    }
+    fun setShowProgress(enabled: Boolean) {
+        viewModelScope.launch { settings.setShowProgress(enabled) }
+    }
+    fun setCelebrateEnabled(enabled: Boolean) {
+        viewModelScope.launch { settings.setCelebrateEnabled(enabled) }
+    }
+    fun setGroupOverdue(enabled: Boolean) {
+        viewModelScope.launch { settings.setGroupOverdue(enabled) }
+    }
+    fun setLowBatteryMode(enabled: Boolean) {
+        viewModelScope.launch { settings.setLowBatteryMode(enabled) }
+    }
+    fun setLandscapeMute(enabled: Boolean) {
+        viewModelScope.launch { settings.setLandscapeMute(enabled) }
+    }
+
     // ---------------------------------------------------------------- 设置
 
     fun setOverlayEnabled(enabled: Boolean) {

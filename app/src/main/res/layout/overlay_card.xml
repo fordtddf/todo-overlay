@@ -41,6 +41,16 @@
             android:textColor="#B3FFFFFF"
             android:textSize="13sp" />
 
+        <!-- 今日完成进度：3/7 · 42% -->
+        <TextView
+            android:id="@+id/tv_progress_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textColor="#8AB4F8"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <ImageButton
             android:id="@+id/btn_close"
             android:layout_width="30dp"
@@ -77,6 +87,27 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
+
+        <!-- 逾期任务折叠区：默认隐藏，点击标题展开 -->
+        <TextView
+            android:id="@+id/tv_overdue_toggle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="false"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp"
+            android:textColor="#80FFFFFF"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/container_overdue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone" />
     </com.example.todooverlay.overlay.MaxHeightScrollView>
 
     <ProgressBar
@@ -89,5 +120,38 @@
         android:max="1000"
         android:progress="1000"
         android:progressDrawable="@drawable/progress_overlay" />
+
+    <!-- 快速记一笔：点击后就地展开输入框 -->
+    <TextView
+        android:id="@+id/btn_quick_add"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:layout_marginTop="8dp"
+        android:background="?android:attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="false"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="@string/overlay_quick_add"
+        android:textColor="#8AB4F8"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <EditText
+        android:id="@+id/et_quick_add"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:layout_marginTop="6dp"
+        android:backgroundTint="#8AB4F8"
+        android:hint="@string/overlay_quick_add_hint"
+        android:imeOptions="actionDone"
+        android:inputType="text"
+        android:maxLines="1"
+        android:textColor="#FFFFFFFF"
+        android:textColorHint="#80FFFFFF"
+        android:textSize="13sp"
+        android:visibility="gone" />
 
 </com.example.todooverlay.overlay.TouchObservingLayout>

@@ -12,15 +12,20 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.Gravity
+import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.view.animation.LinearInterpolator
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.core.view.isVisible
 import com.example.todooverlay.R
 import com.example.todooverlay.data.LoopExitMode
 import com.example.todooverlay.data.ScrollMode
@@ -39,7 +44,21 @@ data class OverlayConfig(
     val speedDpPerSec: Int,
     val opacityPercent: Int,
     val widthPercent: Int,
-    val maxHeightDp: Int
+    val maxHeightDp: Int,
+    /** 上滑甩飞立即关闭 */
+    val flingToDismiss: Boolean,
+    /** 卡片底部「快速记一笔」入口 */
+    val quickAddEnabled: Boolean,
+    /** 顶部今日完成进度 */
+    val showProgress: Boolean,
+    /** 逾期任务折叠 */
+    val groupOverdue: Boolean,
+    /** 今日零点时间戳，用于区分今日 / 往日任务 */
+    val todayStart: Long,
+    val progressDone: Int,
+    val progressTotal: Int,
+    /** 低电量降级：禁用动画，静态展示 */
+    val forceStatic: Boolean
 )
 
 /**
@@ -70,16 +89,21 @@ class OverlayManager(context: Context) {
     private var closeRunnable: Runnable? = null
     private var resumeRunnable: Runnable? = null
 
+    /** 保存窗口参数，快速记一笔时需要临时改 flags 再 updateViewLayout */
+    private var rootParams: WindowManager.LayoutParams? = null
+    private var flingDetector: GestureDetector? = null
+
     /** 用户已经在卡片上勾选过，之后只等淡出，不再恢复滚动和倒计时 */
     private var completionTriggered = false
 
     fun show(
         todos: List<Todo>,
         config: OverlayConfig,
-        onToggle: (Todo, Boolean) -> Unit
+        onToggle: (Todo, Boolean) -> Unit,
+        onQuickAdd: (String) -> Unit
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { show(todos, config, onToggle) }
+            mainHandler.post { show(todos, config, onToggle, onQuickAdd) }
             return
         }
         removeImmediately()
@@ -89,13 +113,17 @@ class OverlayManager(context: Context) {
 
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
         bindContent(view, todos, config, onToggle)
+        bindQuickAdd(view, config, onQuickAdd)
+        applyProgress(view, config)
         applySize(view, config)
         applyOpacity(view, config)
-        attachInteractionHandlers(view)
+        attachInteractionHandlers(view, config)
 
         view.alpha = 0f
+        val params = buildParams(config)
+        rootParams = params
         try {
-            windowManager.addView(view, buildParams(config))
+            windowManager.addView(view, params)
         } catch (t: Throwable) {
             return
         }
@@ -127,6 +155,59 @@ class OverlayManager(context: Context) {
         removeImmediately()
     }
 
+    /**
+     * 全部完成时的祝贺气泡。没有列表、没有滚动，停留 2 秒自动淡出。
+     */
+    fun showCelebration(
+        done: Int,
+        total: Int,
+        durationSeconds: Int,
+        widthPercent: Int,
+        opacityPercent: Int
+    ) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post {
+                showCelebration(done, total, durationSeconds, widthPercent, opacityPercent)
+            }
+            return
+        }
+        removeImmediately()
+        completionTriggered = false
+
+        if (!Settings.canDrawOverlays(appContext)) return
+
+        val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_celebration, null)
+        view.findViewById<TextView>(R.id.tv_celebration_detail).text =
+            appContext.getString(R.string.overlay_today_progress, done, total, 100)
+        view.background?.mutate()?.alpha = opacityPercent.coerceIn(0, 100) * 255 / 100
+
+        val params = WindowManager.LayoutParams(
+            (screenWidth() * widthPercent / 100f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        params.y = dp(TOP_MARGIN_DP)
+
+        view.alpha = 0f
+        try {
+            windowManager.addView(view, params)
+        } catch (t: Throwable) {
+            return
+        }
+        rootView = view
+        view.animate().alpha(1f).setDuration(FADE_IN_MS).start()
+
+        mainHandler.postDelayed({
+            if (rootView === view) fadeOut()
+        }, durationSeconds * 1000L)
+    }
+
     // ---------------------------------------------------------------- 内容与尺寸
 
     private fun bindContent(
@@ -135,34 +216,153 @@ class OverlayManager(context: Context) {
         config: OverlayConfig,
         onToggle: (Todo, Boolean) -> Unit
     ) {
-        val container = view.findViewById<LinearLayout>(R.id.container_items)
         val inflater = LayoutInflater.from(view.context)
+        val todayContainer = view.findViewById<LinearLayout>(R.id.container_items)
 
-        todos.forEach { todo ->
-            val row = inflater.inflate(R.layout.overlay_item, container, false)
-            val checkBox = row.findViewById<CheckBox>(R.id.cb_item)
-            val label = row.findViewById<TextView>(R.id.tv_item)
+        // 逾期判定：单次任务创建于今天之前、且仍未完成
+        fun isOverdue(todo: Todo): Boolean = !todo.isDaily && todo.createdAt < config.todayStart
 
-            label.text = if (todo.isDaily) {
-                appContext.getString(R.string.overlay_daily_prefix, todo.title)
-            } else {
-                todo.title
+        if (!config.groupOverdue) {
+            todos.forEach { addRow(inflater, todayContainer, it, view, onToggle) }
+        } else {
+            val todayItems = todos.filterNot(::isOverdue)
+            val overdueItems = todos.filter(::isOverdue)
+
+            todayItems.forEach { addRow(inflater, todayContainer, it, view, onToggle) }
+
+            if (overdueItems.isNotEmpty()) {
+                val overdueContainer = view.findViewById<LinearLayout>(R.id.container_overdue)
+                val toggle = view.findViewById<TextView>(R.id.tv_overdue_toggle)
+                toggle.isVisible = true
+                toggle.text = appContext.getString(R.string.overlay_overdue_toggle, overdueItems.size)
+
+                overdueItems.forEach {
+                    addRow(inflater, overdueContainer, it, view, onToggle)
+                }
+
+                toggle.setOnClickListener {
+                    val expanded = overdueContainer.isVisible
+                    overdueContainer.isVisible = !expanded
+                    toggle.text = if (expanded) {
+                        appContext.getString(R.string.overlay_overdue_toggle, overdueItems.size)
+                    } else {
+                        appContext.getString(R.string.overlay_overdue_collapse)
+                    }
+                    // 展开后内容变高，需要重新测量滚动范围
+                    view.post { refreshScrollRange(view) }
+                }
             }
-
-            var checked = false
-            row.setOnClickListener {
-                checked = !checked
-                applyRowState(checkBox, label, checked)
-                onToggle(todo, checked)
-                onItemToggled(view)
-            }
-            container.addView(row)
         }
 
         view.findViewById<TextView>(R.id.tv_countdown).text =
             appContext.getString(R.string.overlay_countdown, config.durationSeconds)
 
         view.findViewById<View>(R.id.btn_close).setOnClickListener { fadeOut() }
+    }
+
+    private fun addRow(
+        inflater: LayoutInflater,
+        container: LinearLayout,
+        todo: Todo,
+        cardView: View,
+        onToggle: (Todo, Boolean) -> Unit
+    ) {
+        val row = inflater.inflate(R.layout.overlay_item, container, false)
+        val checkBox = row.findViewById<CheckBox>(R.id.cb_item)
+        val label = row.findViewById<TextView>(R.id.tv_item)
+
+        label.text = if (todo.isDaily) {
+            appContext.getString(R.string.overlay_daily_prefix, todo.title)
+        } else {
+            todo.title
+        }
+
+        var checked = false
+        row.setOnClickListener {
+            checked = !checked
+            applyRowState(checkBox, label, checked)
+            onToggle(todo, checked)
+            onItemToggled(cardView)
+        }
+        container.addView(row)
+    }
+
+    /** 顶部今日完成进度：3/7 · 42% */
+    private fun applyProgress(view: View, config: OverlayConfig) {
+        val label = view.findViewById<TextView>(R.id.tv_progress_text)
+        if (!config.showProgress || config.progressTotal <= 0) {
+            label.isVisible = false
+            return
+        }
+        val percent = config.progressDone * 100 / config.progressTotal
+        label.isVisible = true
+        label.text = appContext.getString(
+            R.string.overlay_today_progress,
+            config.progressDone,
+            config.progressTotal,
+            percent
+        )
+    }
+
+    /** 快速记一笔：点击展开输入框并请求焦点，回车保存后收起 */
+    private fun bindQuickAdd(
+        view: View,
+        config: OverlayConfig,
+        onQuickAdd: (String) -> Unit
+    ) {
+        if (!config.quickAddEnabled) return
+
+        val button = view.findViewById<TextView>(R.id.btn_quick_add)
+        val input = view.findViewById<EditText>(R.id.et_quick_add)
+        button.isVisible = true
+
+        val params = rootParams ?: return
+
+        button.setOnClickListener {
+            button.isVisible = false
+            input.isVisible = true
+            // 默认窗口是 NOT_FOCUSABLE，输入法弹不出来；临时放开焦点
+            params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            try {
+                windowManager.updateViewLayout(view, params)
+            } catch (t: Throwable) {
+                return@setOnClickListener
+            }
+            input.requestFocus()
+            val imm = appContext.getSystemService(InputMethodManager::class.java)
+            imm?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        }
+
+        fun finishInput(save: Boolean) {
+            val text = input.text.toString().trim()
+            if (save && text.isNotEmpty()) onQuickAdd(text)
+            input.setText("")
+            input.isVisible = false
+            button.isVisible = true
+            appContext.getSystemService(InputMethodManager::class.java)
+                ?.hideSoftInputFromWindow(input.windowToken, 0)
+            // 恢复不获取焦点的穿透状态
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            try {
+                windowManager.updateViewLayout(view, params)
+            } catch (t: Throwable) {
+                // 窗口已被移除，忽略
+            }
+        }
+
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE ||
+                actionId == EditorInfo.IME_ACTION_UNSPECIFIED
+            ) {
+                finishInput(save = true)
+                true
+            } else {
+                false
+            }
+        }
+        input.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) finishInput(save = false)
+        }
     }
 
     /** 卡片宽度按百分比、列表高度按用户设定，但都不超过半屏 */
@@ -214,6 +414,12 @@ class OverlayManager(context: Context) {
 
         val looping = config.scrollMode == ScrollMode.LOOP
         val byCount = looping && config.loopExitMode == LoopExitMode.COUNT
+
+        // 低电量降级：不创建滚动器，静态展示一小段时间就关
+        if (config.forceStatic) {
+            startCountdown(view, LOW_BATTERY_SHOW_MS)
+            return
+        }
 
         if (needScroll) {
             scroller = OverlayScroller(
@@ -304,10 +510,45 @@ class OverlayManager(context: Context) {
      *
      * 不处理 ACTION_OUTSIDE —— 点卡片外面必须让卡片保持不动。
      */
-    private fun attachInteractionHandlers(view: View) {
+    private fun attachInteractionHandlers(view: View, config: OverlayConfig) {
         // 卡片空白处也要消费掉触摸，避免穿透到下层应用
         view.isClickable = true
         (view as? TouchObservingLayout)?.touchObserver = ::onTouchObserved
+
+        if (!config.flingToDismiss) return
+
+        // 上滑甩飞关闭。GestureDetector 只做识别，事件照常往下分发
+        flingDetector = GestureDetector(appContext, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (velocityY < -FLING_VELOCITY_THRESHOLD) {
+                    flingUpAndDismiss()
+                    return true
+                }
+                return false
+            }
+        })
+        view.setOnTouchListener { _, event ->
+            flingDetector?.onTouchEvent(event)
+            false
+        }
+    }
+
+    /** 上滑关闭：卡片整体向上滑出并淡出 */
+    private fun flingUpAndDismiss() {
+        val view = rootView ?: return
+        rootView = null
+        cleanupTimers()
+        view.animate()
+            .translationY(-view.height.toFloat() - dp(FLING_EXIT_DP))
+            .alpha(0f)
+            .setDuration(FLING_EXIT_MS)
+            .withEndAction { safeRemove(view) }
+            .start()
     }
 
     private fun onTouchObserved(event: MotionEvent) {
@@ -410,6 +651,33 @@ class OverlayManager(context: Context) {
         cancelResume()
         scroller?.stop()
         scroller = null
+        flingDetector = null
+        rootParams = null
+    }
+
+    /** 逾期分组展开后内容变高，重新测一次滚动范围 */
+    private fun refreshScrollRange(view: View) {
+        val config = currentConfig ?: return
+        val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
+        val distance = ((scroll.getChildAt(0)?.height ?: 0) - scroll.height).coerceAtLeast(0)
+        if (distance <= 0) return
+        scroller?.stop()
+        scroller = null
+        if (!config.autoScroll || config.forceStatic) return
+
+        scroller = OverlayScroller(
+            scrollView = scroll,
+            scrollableDistance = distance,
+            speedPxPerSec = dp(config.speedDpPerSec),
+            loop = config.scrollMode == ScrollMode.LOOP,
+            targetLoops = if (config.scrollMode == ScrollMode.LOOP &&
+                config.loopExitMode == LoopExitMode.COUNT
+            ) config.loopMaxCount else 0,
+            onRoundComplete = { completed ->
+                updateRoundLabel(view, completed, config.loopMaxCount)
+            },
+            onLoopsFinished = { fadeOut() }
+        ).also { it.start() }
     }
 
     private fun safeRemove(view: View) {
@@ -470,5 +738,14 @@ class OverlayManager(context: Context) {
 
         /** 手指抬起后多久恢复自动滚动 */
         private const val RESUME_DELAY_MS = 2000L
+
+        /** 上滑甩飞关闭的触发速度（px/s） */
+        private const val FLING_VELOCITY_THRESHOLD = 1000f
+
+        private const val FLING_EXIT_MS = 220L
+        private const val FLING_EXIT_DP = 40
+
+        /** 低电量模式下静态展示的时长 */
+        private const val LOW_BATTERY_SHOW_MS = 3000L
     }
 }
