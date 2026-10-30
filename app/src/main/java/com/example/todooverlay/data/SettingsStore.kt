@@ -48,7 +48,12 @@ class SettingsStore(private val context: Context) {
     }
 
     val scrollSpeedDpPerSec: Flow<Int> = prefs.map {
-        (it[KEY_SCROLL_SPEED] ?: DEFAULT_SPEED).coerceIn(SPEED_SLOW, SPEED_FAST)
+        (it[KEY_SCROLL_SPEED] ?: DEFAULT_SPEED).coerceIn(SPEED_MIN, SPEED_MAX)
+    }
+
+    val cardOpacityPercent: Flow<Int> = prefs.map {
+        (it[KEY_CARD_OPACITY] ?: DEFAULT_OPACITY_PERCENT)
+            .coerceIn(MIN_OPACITY_PERCENT, MAX_OPACITY_PERCENT)
     }
 
     val cardWidthPercent: Flow<Int> = prefs.map {
@@ -74,7 +79,12 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { it[KEY_SCROLL_MODE] = mode.name }
 
     suspend fun setScrollSpeedDpPerSec(speed: Int) =
-        context.dataStore.edit { it[KEY_SCROLL_SPEED] = speed.coerceIn(SPEED_SLOW, SPEED_FAST) }
+        context.dataStore.edit { it[KEY_SCROLL_SPEED] = speed.coerceIn(SPEED_MIN, SPEED_MAX) }
+
+    suspend fun setCardOpacityPercent(percent: Int) =
+        context.dataStore.edit {
+            it[KEY_CARD_OPACITY] = percent.coerceIn(MIN_OPACITY_PERCENT, MAX_OPACITY_PERCENT)
+        }
 
     suspend fun setCardWidthPercent(percent: Int) =
         context.dataStore.edit {
@@ -94,7 +104,9 @@ class SettingsStore(private val context: Context) {
             autoScroll = p[KEY_AUTO_SCROLL] ?: DEFAULT_AUTO_SCROLL,
             scrollMode = ScrollMode.from(p[KEY_SCROLL_MODE]),
             scrollSpeedDpPerSec = (p[KEY_SCROLL_SPEED] ?: DEFAULT_SPEED)
-                .coerceIn(SPEED_SLOW, SPEED_FAST),
+                .coerceIn(SPEED_MIN, SPEED_MAX),
+            cardOpacityPercent = (p[KEY_CARD_OPACITY] ?: DEFAULT_OPACITY_PERCENT)
+                .coerceIn(MIN_OPACITY_PERCENT, MAX_OPACITY_PERCENT),
             cardWidthPercent = (p[KEY_CARD_WIDTH] ?: DEFAULT_WIDTH_PERCENT)
                 .coerceIn(MIN_WIDTH_PERCENT, MAX_WIDTH_PERCENT),
             cardMaxHeightDp = (p[KEY_CARD_HEIGHT] ?: DEFAULT_HEIGHT_DP)
@@ -108,6 +120,7 @@ class SettingsStore(private val context: Context) {
         val autoScroll: Boolean,
         val scrollMode: ScrollMode,
         val scrollSpeedDpPerSec: Int,
+        val cardOpacityPercent: Int,
         val cardWidthPercent: Int,
         val cardMaxHeightDp: Int
     )
@@ -120,10 +133,19 @@ class SettingsStore(private val context: Context) {
         const val DEFAULT_AUTO_SCROLL = true
         val DEFAULT_SCROLL_MODE = ScrollMode.SINGLE
 
-        const val SPEED_SLOW = 25
-        const val SPEED_NORMAL = 40
-        const val SPEED_FAST = 60
-        const val DEFAULT_SPEED = SPEED_NORMAL
+        /** 滚动速度：20 dp/s（超慢）~ 150 dp/s（极速） */
+        const val SPEED_MIN = 20
+        const val SPEED_MAX = 150
+        const val SPEED_SLOW = 30
+        const val SPEED_NORMAL = 50
+        const val SPEED_FAST = 80
+        const val SPEED_ULTRA = 120
+        const val DEFAULT_SPEED = 40
+
+        /** 卡片背景不透明度。低于 50% 会明显影响文字辨识度，所以卡在这个下限 */
+        const val MIN_OPACITY_PERCENT = 50
+        const val MAX_OPACITY_PERCENT = 100
+        const val DEFAULT_OPACITY_PERCENT = 100
 
         const val MIN_WIDTH_PERCENT = 70
         const val MAX_WIDTH_PERCENT = 95
@@ -146,6 +168,7 @@ class SettingsStore(private val context: Context) {
         private val KEY_AUTO_SCROLL = booleanPreferencesKey("overlay_auto_scroll")
         private val KEY_SCROLL_MODE = stringPreferencesKey("overlay_scroll_mode")
         private val KEY_SCROLL_SPEED = intPreferencesKey("overlay_scroll_speed")
+        private val KEY_CARD_OPACITY = intPreferencesKey("overlay_card_opacity_percent")
         private val KEY_CARD_WIDTH = intPreferencesKey("overlay_card_width_percent")
         private val KEY_CARD_HEIGHT = intPreferencesKey("overlay_card_max_height_dp")
     }

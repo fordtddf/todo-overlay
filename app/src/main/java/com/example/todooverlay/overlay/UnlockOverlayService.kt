@@ -117,6 +117,7 @@ class UnlockOverlayService : Service() {
                     autoScroll = settings.autoScroll,
                     scrollMode = settings.scrollMode,
                     speedDpPerSec = settings.scrollSpeedDpPerSec,
+                    opacityPercent = settings.cardOpacityPercent,
                     widthPercent = settings.cardWidthPercent,
                     maxHeightDp = settings.cardMaxHeightDp
                 )

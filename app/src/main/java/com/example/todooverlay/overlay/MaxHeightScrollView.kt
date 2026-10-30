@@ -27,4 +27,17 @@ class MaxHeightScrollView @JvmOverloads constructor(
         }
         super.onMeasure(widthMeasureSpec, spec)
     }
+
+    /**
+     * 会话式保持滚动条可见。
+     *
+     * View.awakenScrollBars() 是 protected，外部调不到，
+     * 这里开一个公开入口供自动滚动时逐帧调用 —— 代码调用 scrollTo 时
+     * 系统默认不会绘制滚动条，必须主动唤醒。
+     */
+    fun keepScrollBarAwake() {
+        awakenScrollBars()
+        // 即使系统把滚动条标记为淡出，也强制重绘一次
+        invalidate()
+    }
 }

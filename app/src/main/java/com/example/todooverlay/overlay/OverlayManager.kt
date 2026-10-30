@@ -33,6 +33,7 @@ data class OverlayConfig(
     val autoScroll: Boolean,
     val scrollMode: ScrollMode,
     val speedDpPerSec: Int,
+    val opacityPercent: Int,
     val widthPercent: Int,
     val maxHeightDp: Int
 )
@@ -85,6 +86,7 @@ class OverlayManager(context: Context) {
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
         bindContent(view, todos, config, onToggle)
         applySize(view, config)
+        applyOpacity(view, config)
         attachInteractionHandlers(view)
 
         view.alpha = 0f
@@ -163,6 +165,18 @@ class OverlayManager(context: Context) {
     private fun applySize(view: View, config: OverlayConfig) {
         val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
         scroll.maxHeight = min(dp(config.maxHeightDp), (screenHeight() * 0.5f).toInt())
+    }
+
+    /**
+     * 只调背景 drawable 的 alpha，不动根布局的 view alpha。
+     *
+     * 用 view.alpha 会把子视图（文字、复选框）一起变淡，50% 时几乎看不清；
+     * 改背景 drawable 能保证文字始终是高对比度的纯白。
+     */
+    private fun applyOpacity(view: View, config: OverlayConfig) {
+        val percent = config.opacityPercent.coerceIn(0, 100)
+        // mutate() 避免改到共享的 ConstantState，影响后续其它卡片实例
+        view.background?.mutate()?.alpha = percent * 255 / 100
     }
 
     private fun applyRowState(checkBox: CheckBox, label: TextView, checked: Boolean) {
@@ -378,8 +392,10 @@ class OverlayManager(context: Context) {
             // 不加 FLAG_NOT_TOUCHABLE：卡片要能接收点击。
             // FLAG_NOT_TOUCH_MODAL 保证窗口矩形之外的触摸照常交给下层应用。
             // 不要加 FLAG_WATCH_OUTSIDE_TOUCH —— 那会把「点了外面」当成关闭信号。
+            // HARDWARE_ACCELERATED 让自动滚动走 GPU 合成，高刷屏上更跟手。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )

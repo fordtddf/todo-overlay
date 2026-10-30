@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 卡片右侧滚动条：半透明细条，不抢文字注意力 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#59FFFFFF" />
+    <corners android:radius="2dp" />
+</shape>

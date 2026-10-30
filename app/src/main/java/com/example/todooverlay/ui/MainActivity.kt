@@ -416,6 +416,7 @@ private fun SettingsScreen(
     val autoScroll by vm.autoScrollEnabled.collectAsStateWithLifecycle()
     val mode by vm.scrollMode.collectAsStateWithLifecycle()
     val speed by vm.scrollSpeed.collectAsStateWithLifecycle()
+    val opacityPercent by vm.cardOpacityPercent.collectAsStateWithLifecycle()
     val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
     val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
 
@@ -425,6 +426,7 @@ private fun SettingsScreen(
     val autoScrollOn = autoScroll ?: SettingsStore.DEFAULT_AUTO_SCROLL
     val scrollMode = mode ?: SettingsStore.DEFAULT_SCROLL_MODE
     val speedValue = speed ?: SettingsStore.DEFAULT_SPEED
+    val cardOpacity = opacityPercent ?: SettingsStore.DEFAULT_OPACITY_PERCENT
     val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
     val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
 
@@ -596,18 +598,43 @@ private fun SettingsScreen(
                         modifier = Modifier.padding(top = 16.dp)
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ChoiceChip("慢速 25", speedValue == SettingsStore.SPEED_SLOW) {
+                        ChoiceChip("慢速", speedValue == SettingsStore.SPEED_SLOW) {
                             vm.setScrollSpeed(SettingsStore.SPEED_SLOW)
                         }
-                        ChoiceChip("适中 40", speedValue == SettingsStore.SPEED_NORMAL) {
+                        ChoiceChip("标准", speedValue == SettingsStore.SPEED_NORMAL) {
                             vm.setScrollSpeed(SettingsStore.SPEED_NORMAL)
                         }
-                        ChoiceChip("快速 60", speedValue == SettingsStore.SPEED_FAST) {
+                        ChoiceChip("快速", speedValue == SettingsStore.SPEED_FAST) {
                             vm.setScrollSpeed(SettingsStore.SPEED_FAST)
                         }
+                        ChoiceChip("极速", speedValue == SettingsStore.SPEED_ULTRA) {
+                            vm.setScrollSpeed(SettingsStore.SPEED_ULTRA)
+                        }
+                    }
+
+                    var speedSlider by remember(speedValue) {
+                        mutableFloatStateOf(speedValue.toFloat())
                     }
                     Text(
-                        "单位 dp/秒。速度只影响自动滚动，单遍模式的总时长会自动跟着重算",
+                        "${speedSlider.roundToInt()} dp/s",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Slider(
+                        value = speedSlider,
+                        onValueChange = { speedSlider = it },
+                        onValueChangeFinished = {
+                            // 5 dp 一档
+                            vm.setScrollSpeed((speedSlider / 5).roundToInt() * 5)
+                        },
+                        valueRange = SettingsStore.SPEED_MIN.toFloat()..
+                            SettingsStore.SPEED_MAX.toFloat(),
+                        steps = (SettingsStore.SPEED_MAX - SettingsStore.SPEED_MIN) / 5 - 1
+                    )
+                    Text(
+                        "范围 ${SettingsStore.SPEED_MIN}~${SettingsStore.SPEED_MAX} dp/s。" +
+                            "速度只影响自动滚动，单遍模式的总时长会自动跟着重算",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -701,6 +728,33 @@ private fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                var opacitySlider by remember(cardOpacity) {
+                    mutableFloatStateOf(cardOpacity.toFloat())
+                }
+                Text(
+                    "卡片不透明度 ${opacitySlider.roundToInt()}%",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+                Slider(
+                    value = opacitySlider,
+                    onValueChange = { opacitySlider = it },
+                    onValueChangeFinished = {
+                        vm.setCardOpacityPercent((opacitySlider / 5).roundToInt() * 5)
+                    },
+                    valueRange = SettingsStore.MIN_OPACITY_PERCENT.toFloat()..
+                        SettingsStore.MAX_OPACITY_PERCENT.toFloat(),
+                    steps = (SettingsStore.MAX_OPACITY_PERCENT -
+                        SettingsStore.MIN_OPACITY_PERCENT) / 5 - 1
+                )
+                Text(
+                    "只调背景，文字始终保持纯白。低于 " +
+                        "${SettingsStore.MIN_OPACITY_PERCENT}% 会明显影响辨识度，所以卡在这个下限",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 TextButton(
                     onClick = { vm.resetCardSize() },
                     contentPadding = PaddingValues(0.dp)

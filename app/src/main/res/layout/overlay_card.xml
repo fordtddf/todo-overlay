@@ -52,13 +52,25 @@
             android:src="@drawable/ic_close" />
     </LinearLayout>
 
+    <!--
+      代码调用 scrollTo 时系统通常不绘滚动条，所以这里：
+      · scrollbars=vertical 明确启用
+      · fadeScrollbars=false 常驻显示，不自动淡出
+      · scrollbarStyle=insideOverlay 浮在内容上层，不挤占文字宽度
+      · 配合 OverlayScroller 每帧 awakenScrollBars() 持续刷新
+    -->
     <com.example.todooverlay.overlay.MaxHeightScrollView
         android:id="@+id/scroll_items"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:fadeScrollbars="false"
         android:overScrollMode="ifContentScrolls"
-        android:scrollbars="none">
+        android:scrollbarAlwaysDrawVerticalTrack="false"
+        android:scrollbarSize="3dp"
+        android:scrollbarStyle="insideOverlay"
+        android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+        android:scrollbars="vertical">
 
         <LinearLayout
             android:id="@+id/container_items"

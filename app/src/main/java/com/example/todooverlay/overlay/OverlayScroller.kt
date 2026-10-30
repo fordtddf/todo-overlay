@@ -6,7 +6,6 @@ import android.animation.ValueAnimator
 import android.os.Handler
 import android.os.Looper
 import android.view.animation.LinearInterpolator
-import android.widget.ScrollView
 import kotlin.math.abs
 
 /**
@@ -18,7 +17,7 @@ import kotlin.math.abs
  * 用 ValueAnimator + LinearInterpolator 驱动 scrollTo，速度恒定、无跳帧。
  */
 class OverlayScroller(
-    private val scrollView: ScrollView,
+    private val scrollView: MaxHeightScrollView,
     private val speedPxPerSec: Int,
     private val loop: Boolean
 ) {
@@ -98,7 +97,13 @@ class OverlayScroller(
         animator = ValueAnimator.ofInt(from, to).apply {
             duration = durationMs
             interpolator = LinearInterpolator()
-            addUpdateListener { scrollView.scrollTo(0, it.animatedValue as Int) }
+            addUpdateListener { animator ->
+                // 每帧只做两件事：赋值滚动位置、唤醒滚动条。
+                // 绝不能在这里 requestLayout() 或重新 inflate，那会直接掉帧。
+                scrollView.scrollTo(0, animator.animatedValue as Int)
+                // 代码滚动时系统默认不画滚动条，唤醒一下才能看到当前位置
+                scrollView.keepScrollBarAwake()
+            }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     if (running) onReached(to)

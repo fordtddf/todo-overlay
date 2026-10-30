@@ -41,6 +41,9 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
     val scrollSpeed: StateFlow<Int?> = settings.scrollSpeedDpPerSec
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    val cardOpacityPercent: StateFlow<Int?> = settings.cardOpacityPercent
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     val cardWidthPercent: StateFlow<Int?> = settings.cardWidthPercent
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -105,6 +108,10 @@ class TodoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setScrollSpeed(speedDpPerSec: Int) {
         viewModelScope.launch { settings.setScrollSpeedDpPerSec(speedDpPerSec) }
+    }
+
+    fun setCardOpacityPercent(percent: Int) {
+        viewModelScope.launch { settings.setCardOpacityPercent(percent) }
     }
 
     fun setCardWidthPercent(percent: Int) {
