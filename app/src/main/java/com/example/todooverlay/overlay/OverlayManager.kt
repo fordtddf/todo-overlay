@@ -1,32 +1,39 @@
 package com.example.todooverlay.overlay
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.DisplayMetrics
-import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.isVisible
 import com.example.todooverlay.R
+import com.example.todooverlay.data.Todo
 import kotlin.math.ceil
 
 /**
  * 解锁悬浮卡片。
  *
- * 生命周期独立于 Activity，因此只用 ApplicationContext 拿 WindowManager，
- * 所有 add/remove 都走 try-catch —— 快速反复解锁时最容易在 removeView 上崩。
- * 视图不接收触摸（FLAG_NOT_TOUCHABLE），纯展示，绝不挡住首页图标。
+ * 窗口只在自己的卡片矩形内接收触摸（FLAG_NOT_TOUCH_MODAL），
+ * 卡片以外的区域完全穿透给下层桌面/应用，绝不挡图标。
+ *
+ * 注意：不要加 FLAG_BLUR_BEHIND。Android 12+ 上系统会为模糊在窗口下铺一层
+ * Dim Layer，那层遮罩的不透明度超过 BlockUntrustedTouches 的阈值，
+ * 结果是整块屏幕的触摸都被丢弃（日志：Untrusted touch due to occlusion by Dim Layer）。
  */
 class OverlayManager(context: Context) {
 
@@ -37,29 +44,38 @@ class OverlayManager(context: Context) {
 
     private var rootView: View? = null
     private var countdown: ValueAnimator? = null
+    private var closeRunnable: Runnable? = null
+
+    /** 用户已经在卡片上勾选过，之后只等淡出，不再恢复自动倒计时 */
+    private var completionTriggered = false
 
     /**
-     * 展示未完成事项。
-     * [titles] 已截断到 [MAX_ITEMS] 条；[totalCount] 是当天未完成的总数，用于提示还有多少没显示。
+     * 展示待完成事项。[todos] 已按「每日优先 + 创建时间」排好序并截断到 [MAX_ITEMS]。
+     * [onToggle] 在用户点选某一条时回调，第二个参数是勾选后的状态。
      */
-    fun show(titles: List<String>, totalCount: Int, durationSeconds: Int) {
+    fun show(
+        todos: List<Todo>,
+        totalCount: Int,
+        durationSeconds: Int,
+        onToggle: (Todo, Boolean) -> Unit
+    ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { show(titles, totalCount, durationSeconds) }
+            mainHandler.post { show(todos, totalCount, durationSeconds, onToggle) }
             return
         }
         // 上一次还没淡出完就又被解锁了：先干净移除，避免叠加
         removeImmediately()
+        completionTriggered = false
 
         if (!Settings.canDrawOverlays(appContext)) return
 
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
-        bindContent(view, titles, totalCount, durationSeconds)
+        bindContent(view, todos, totalCount, durationSeconds, onToggle)
+        attachTouchHandlers(view)
 
-        val params = buildParams()
         view.alpha = 0f
-
         try {
-            windowManager.addView(view, params)
+            windowManager.addView(view, buildParams())
         } catch (t: Throwable) {
             // 权限被中途撤销 / BadToken / 窗口已失效，静默放弃本次展示
             return
@@ -87,21 +103,38 @@ class OverlayManager(context: Context) {
         removeImmediately()
     }
 
-    // ---------------------------------------------------------------- 内部实现
+    // ---------------------------------------------------------------- 内容绑定
 
     private fun bindContent(
         view: View,
-        titles: List<String>,
+        todos: List<Todo>,
         totalCount: Int,
-        durationSeconds: Int
+        durationSeconds: Int,
+        onToggle: (Todo, Boolean) -> Unit
     ) {
-        val shown = titles.take(MAX_ITEMS)
+        val shown = todos.take(MAX_ITEMS)
         val container = view.findViewById<LinearLayout>(R.id.container_items)
         val inflater = LayoutInflater.from(view.context)
 
-        shown.forEach { title ->
+        shown.forEach { todo ->
             val row = inflater.inflate(R.layout.overlay_item, container, false)
-            row.findViewById<TextView>(R.id.tv_item).text = title
+            val checkBox = row.findViewById<CheckBox>(R.id.cb_item)
+            val label = row.findViewById<TextView>(R.id.tv_item)
+
+            label.text = if (todo.isDaily) {
+                appContext.getString(R.string.overlay_daily_prefix, todo.title)
+            } else {
+                todo.title
+            }
+
+            // 每行自己记住勾选状态，点击整行都能切换（复选框本身不接收点击）
+            var checked = false
+            row.setOnClickListener {
+                checked = !checked
+                applyRowState(checkBox, label, checked)
+                onToggle(todo, checked)
+                onItemToggled(view)
+            }
             container.addView(row)
         }
 
@@ -116,6 +149,61 @@ class OverlayManager(context: Context) {
             appContext.getString(R.string.overlay_countdown, durationSeconds)
     }
 
+    /** 勾选后的即时视觉反馈：删除线 + 置灰，不等数据库回来 */
+    private fun applyRowState(checkBox: CheckBox, label: TextView, checked: Boolean) {
+        checkBox.isChecked = checked
+        label.paintFlags = if (checked) {
+            label.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+        } else {
+            label.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+        }
+        label.alpha = if (checked) 0.45f else 1f
+    }
+
+    // ---------------------------------------------------------------- 交互
+
+    private fun attachTouchHandlers(view: View) {
+        // 卡片内部的空白区域也要消费掉触摸，避免穿透到下层应用
+        view.isClickable = true
+        view.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                // 手指按住卡片：暂停倒计时，让用户从容点选
+                MotionEvent.ACTION_DOWN -> if (!completionTriggered) countdown?.pause()
+                // 抬手：恢复倒计时（已经勾选过的话就让它走延时关闭）
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    if (!completionTriggered) countdown?.resume()
+                // 点到卡片外面：直接收起，这一下仍会正常传给下层应用
+                MotionEvent.ACTION_OUTSIDE -> fadeOut()
+            }
+            false
+        }
+    }
+
+    private fun onItemToggled(view: View) {
+        if (!completionTriggered) {
+            completionTriggered = true
+            cancelCountdown()
+            view.findViewById<TextView>(R.id.tv_countdown).text =
+                appContext.getString(R.string.overlay_completed)
+        }
+        // 每次勾选都重新计时，连续勾选时不会被中途关掉
+        scheduleClose()
+    }
+
+    private fun scheduleClose() {
+        cancelScheduledClose()
+        val runnable = Runnable { fadeOut() }
+        closeRunnable = runnable
+        mainHandler.postDelayed(runnable, CLOSE_DELAY_MS)
+    }
+
+    private fun cancelScheduledClose() {
+        closeRunnable?.let { mainHandler.removeCallbacks(it) }
+        closeRunnable = null
+    }
+
+    // ---------------------------------------------------------------- 倒计时
+
     private fun startCountdown(view: View, durationSeconds: Int) {
         val progress = view.findViewById<ProgressBar>(R.id.progress)
         val label = view.findViewById<TextView>(R.id.tv_countdown)
@@ -125,40 +213,21 @@ class OverlayManager(context: Context) {
             interpolator = LinearInterpolator()
             var lastShown = -1
             addUpdateListener { animator ->
-                // elapsed 0 → 1，剩余时间与进度条都按 (1 - elapsed) 递减
                 val elapsed = animator.animatedValue as Float
                 progress.progress = ((1f - elapsed) * progress.max).toInt()
-                // 只在整秒变化时改文本，避免每帧都走一次资源查找
                 val remaining = ceil((1f - elapsed) * durationSeconds).toInt().coerceAtLeast(0)
                 if (remaining != lastShown) {
                     lastShown = remaining
                     label.text = appContext.getString(R.string.overlay_countdown, remaining)
                 }
             }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) = fadeOut()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!completionTriggered) fadeOut()
+                }
             })
             start()
         }
-    }
-
-    private fun fadeOut() {
-        val view = rootView ?: return
-        rootView = null
-        cancelCountdown()
-        view.animate()
-            .alpha(0f)
-            .setDuration(FADE_OUT_MS)
-            .withEndAction { safeRemove(view) }
-            .start()
-    }
-
-    private fun removeImmediately() {
-        val view = rootView ?: return
-        rootView = null
-        cancelCountdown()
-        view.animate().cancel()
-        safeRemove(view)
     }
 
     private fun cancelCountdown() {
@@ -170,47 +239,47 @@ class OverlayManager(context: Context) {
         animator.cancel()
     }
 
-    /**
-     * 诊断用：把窗口的实际不透明度打进 logcat。
-     *
-     * Android 12+ 的 BlockUntrustedTouches 依据「窗口不透明度」判定，
-     * 它算的是 window alpha × 根视图 alpha × 背景 drawable alpha。
-     * 这三者只要有一个没压住，触摸就会被丢弃，而且从界面上完全看不出来。
-     * 排查时执行：
-     *   adb logcat -s OverlayManager
-     */
-    private fun logObscuringOpacity(view: View, params: WindowManager.LayoutParams) {
-        view.post {
-            val windowAlpha = params.alpha
-            val viewAlpha = view.alpha
-            // Drawable.getAlpha() 返回 0~255 的 Int，需换算成 0~1
-            val bgAlpha = (view.background?.alpha ?: 255) / 255f
-            val combined = windowAlpha * viewAlpha * bgAlpha
-            Log.i(
-                TAG,
-                "obscuring opacity: window=$windowAlpha view=$viewAlpha bg=$bgAlpha " +
-                    "combined=$combined threshold=0.8 safe=${combined <= 0.8f}"
-            )
-        }
+    // ---------------------------------------------------------------- 视图移除
+
+    private fun fadeOut() {
+        val view = rootView ?: return
+        rootView = null
+        cancelCountdown()
+        cancelScheduledClose()
+        view.animate()
+            .alpha(0f)
+            .setDuration(FADE_OUT_MS)
+            .withEndAction { safeRemove(view) }
+            .start()
     }
 
-    private fun safeRemove(view: View) {        try {
+    private fun removeImmediately() {
+        val view = rootView ?: return
+        rootView = null
+        cancelCountdown()
+        cancelScheduledClose()
+        view.animate().cancel()
+        safeRemove(view)
+    }
+
+    private fun safeRemove(view: View) {
+        try {
             windowManager.removeViewImmediate(view)
         } catch (t: Throwable) {
             // 视图已被系统回收（息屏、切换用户、进程重建）——忽略即可
         }
     }
 
+    // ---------------------------------------------------------------- 窗口参数
+
     private fun buildParams(): WindowManager.LayoutParams {
-        // 卡片是「可点击」的，不再依赖触摸穿透：
-        // FLAG_NOT_TOUCHABLE + 半透明 在 Android 12+ 上会触发 BlockUntrustedTouches，
-        // 表现为整块区域点不动、滑不动，且降低不透明度并不能稳定绕过。
-        // 改为可点击窗口后，卡片区域内的触摸由卡片消费（点一下即关闭），
-        // 区域外因为有 FLAG_NOT_TOUCH_MODAL，触摸照常交给下层应用。
         val params = WindowManager.LayoutParams(
             screenWidth() - dp(SIDE_MARGIN_DP) * 2,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // 不加 FLAG_NOT_TOUCHABLE：卡片要能接收点击。
+            // FLAG_NOT_TOUCH_MODAL 保证窗口矩形之外的触摸照常交给下层应用，
+            // FLAG_WATCH_OUTSIDE_TOUCH 让我们能感知「点到外面了」并顺手收起。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
@@ -219,19 +288,11 @@ class OverlayManager(context: Context) {
         )
         params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         params.y = dp(TOP_MARGIN_DP)
-
-        // 关键：不要用 FLAG_BLUR_BEHIND / setBlurBehindRadius。
-        // 实测在 HyperOS 上，背景模糊会让系统在该窗口下铺一层 Dim Layer，
-        // 这层遮罩的不透明度超过 BlockUntrustedTouches 的阈值，
-        // 导致卡片显示期间所有触摸被 InputDispatcher 丢弃
-        // （日志：Untrusted touch due to occlusion by Dim Layer）。
-        // 半透明深色背景本身已经够好看，模糊效果不值得这个代价。
-        params.alpha = MAX_WINDOW_ALPHA
         return params
     }
 
     private fun screenWidth(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             windowManager.currentWindowMetrics.bounds.width()
         } else {
             val metrics = DisplayMetrics()
@@ -244,7 +305,7 @@ class OverlayManager(context: Context) {
         (value * appContext.resources.displayMetrics.density).toInt()
 
     companion object {
-        /** 悬浮卡片最多展示几条，多了就变成列表，违背“瞥一眼就走” */
+        /** 卡片最多展示几条，多了就变成列表，违背“瞥一眼就走” */
         const val MAX_ITEMS = 5
 
         private const val FADE_IN_MS = 180L
@@ -252,9 +313,7 @@ class OverlayManager(context: Context) {
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_MARGIN_DP = 52
 
-        /** 窗口不透明度上限，必须低于 0.8，见 buildParams 注释 */
-        private const val MAX_WINDOW_ALPHA = 0.78f
-
-        private const val TAG = "OverlayManager"
+        /** 勾选后停留多久再淡出，留出看清反馈的时间 */
+        private const val CLOSE_DELAY_MS = 1800L
     }
 }

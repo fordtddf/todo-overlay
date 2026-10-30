@@ -11,35 +11,35 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,7 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             TodoOverlayTheme {
                 val vm: TodoViewModel = viewModel()
-                val todos by vm.todayTodos.collectAsStateWithLifecycle()
+                val todos by vm.todos.collectAsStateWithLifecycle()
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         TodoScreen(
                             todos = todos,
                             onAdd = vm::add,
+                            onEdit = vm::update,
                             onToggle = vm::toggle,
                             onDelete = vm::delete,
                             onOpenSettings = { showSettings = true }
@@ -153,13 +154,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun TodoScreen(
     todos: List<Todo>,
-    onAdd: (String) -> Unit,
+    onAdd: (String, Boolean) -> Unit,
+    onEdit: (Todo, String, Boolean) -> Unit,
     onToggle: (Todo) -> Unit,
     onDelete: (Todo) -> Unit,
     onOpenSettings: () -> Unit
 ) {
-    var input by rememberSaveable { mutableStateOf("") }
-    val pending = todos.count { !it.done }
+    val today = Today.key()
+    val pending = todos.count { !it.isDoneOn(today) }
+    var editor by remember { mutableStateOf<TodoEditorState?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -167,9 +170,9 @@ private fun TodoScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("今日待办", style = MaterialTheme.typography.titleLarge)
+                        Text("待办", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            text = Today.key() + " · 还有 " + pending + " 项",
+                            text = if (pending == 0) "全部完成" else "还有 $pending 项未完成",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -185,35 +188,11 @@ private fun TodoScreen(
                 )
             )
         },
-        bottomBar = {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // edge-to-edge 下 Scaffold 不会自动给 bottomBar 加 inset：
-                    // 键盘弹起时用 ime，收起时用导航栏，取两者较大的那个
-                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                placeholder = { Text("添加一件事…") },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    onAdd(input)
-                    input = ""
-                }),
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            onAdd(input)
-                            input = ""
-                        },
-                        enabled = input.isNotBlank()
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "添加")
-                    }
-                }
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { editor = TodoEditorState(null) },
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                text = { Text("添加") }
             )
         }
     ) { padding ->
@@ -233,21 +212,104 @@ private fun TodoScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "今天还没有待办，添加一条吧",
+                            "还没有待办，点右下角添加",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
             items(todos, key = { it.id }) { todo ->
-                TodoRow(todo = todo, onToggle = { onToggle(todo) }, onDelete = { onDelete(todo) })
+                TodoRow(
+                    todo = todo,
+                    done = todo.isDoneOn(today),
+                    onToggle = { onToggle(todo) },
+                    onEdit = { editor = TodoEditorState(todo) },
+                    onDelete = { onDelete(todo) }
+                )
             }
         }
     }
+
+    editor?.let { state ->
+        TodoEditorDialog(
+            state = state,
+            onDismiss = { editor = null },
+            onConfirm = { title, daily ->
+                val target = state.todo
+                if (target == null) onAdd(title, daily) else onEdit(target, title, daily)
+                editor = null
+            }
+        )
+    }
+}
+
+/** 弹窗状态：todo 为 null 表示新增 */
+private data class TodoEditorState(val todo: Todo?)
+
+@Composable
+private fun TodoEditorDialog(
+    state: TodoEditorState,
+    onDismiss: () -> Unit,
+    onConfirm: (String, Boolean) -> Unit
+) {
+    var title by remember(state) { mutableStateOf(state.todo?.title.orEmpty()) }
+    var daily by remember(state) { mutableStateOf(state.todo?.isDaily ?: false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (state.todo == null) R.string.todo_add_title else R.string.todo_edit_title
+                )
+            )
+        },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    singleLine = true,
+                    placeholder = { Text("要做什么？") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.todo_daily_switch),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            stringResource(R.string.todo_daily_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = daily, onCheckedChange = { daily = it })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(title, daily) },
+                enabled = title.isNotBlank()
+            ) { Text(stringResource(R.string.action_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        }
+    )
 }
 
 @Composable
-private fun TodoRow(todo: Todo, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun TodoRow(
+    todo: Todo,
+    done: Boolean,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -260,8 +322,8 @@ private fun TodoRow(todo: Todo, onToggle: () -> Unit, onDelete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onToggle, modifier = Modifier.size(36.dp)) {
-                val doneColor by animateColorAsState(
-                    if (todo.done) MaterialTheme.colorScheme.primary
+                val checkColor by animateColorAsState(
+                    if (done) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     label = "checkColor"
                 )
@@ -270,16 +332,16 @@ private fun TodoRow(todo: Todo, onToggle: () -> Unit, onDelete: () -> Unit) {
                         .size(22.dp)
                         .clip(CircleShape)
                         .background(
-                            if (todo.done) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                            if (done) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                             else androidx.compose.ui.graphics.Color.Transparent
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (todo.done) {
+                    if (done) {
                         Icon(
                             Icons.Default.Check,
                             contentDescription = "已完成",
-                            tint = doneColor,
+                            tint = checkColor,
                             modifier = Modifier.size(16.dp)
                         )
                     } else {
@@ -293,16 +355,36 @@ private fun TodoRow(todo: Todo, onToggle: () -> Unit, onDelete: () -> Unit) {
                 }
             }
 
-            Text(
-                text = todo.title,
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(horizontal = 8.dp),
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (todo.done) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface,
-                textDecoration = if (todo.done) TextDecoration.LineThrough else null
-            )
+                    .clickable(onClick = onEdit)
+                    .padding(horizontal = 8.dp)
+            ) {
+                Text(
+                    text = todo.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                    textDecoration = if (done) TextDecoration.LineThrough else null
+                )
+                if (todo.isDaily) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Repeat,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            stringResource(R.string.todo_daily_badge),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
 
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                 Icon(

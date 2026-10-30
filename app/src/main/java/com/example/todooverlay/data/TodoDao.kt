@@ -10,16 +10,36 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TodoDao {
 
-    @Query("SELECT * FROM todos WHERE date = :date ORDER BY done ASC, createdAt ASC")
-    fun observeByDate(date: String): Flow<List<Todo>>
+    /** 列表页：全部任务，不按日期过滤 —— 单次任务跨日必须留着 */
+    @Query("SELECT * FROM todos ORDER BY created_at ASC")
+    fun observeAll(): Flow<List<Todo>>
 
-    /** 悬浮窗用：当天未完成的前 N 条，纯展示 */
-    @Query("SELECT * FROM todos WHERE date = :date AND done = 0 ORDER BY createdAt ASC LIMIT :limit")
-    suspend fun pendingForDate(date: String, limit: Int): List<Todo>
+    /**
+     * 悬浮窗用：今日未完成的每日任务 + 所有未完成的单次任务。
+     *
+     * 每日任务的完成判定写在这里（last_completed_date != today），
+     * 所以跨日之后不需要任何重置动作，查询结果自然就回到未完成。
+     */
+    @Query(
+        """
+        SELECT * FROM todos
+        WHERE (is_daily = 1 AND (last_completed_date IS NULL OR last_completed_date != :today))
+           OR (is_daily = 0 AND is_completed = 0)
+        ORDER BY is_daily ASC, created_at ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun pendingForOverlay(today: String, limit: Int): List<Todo>
 
-    /** 当天未完成总数，用于卡片上提示“还有 N 项未显示” */
-    @Query("SELECT COUNT(*) FROM todos WHERE date = :date AND done = 0")
-    suspend fun pendingCount(date: String): Int
+    /** 同上，只是取总数，用于卡片上提示「还有 N 项未显示」 */
+    @Query(
+        """
+        SELECT COUNT(*) FROM todos
+        WHERE (is_daily = 1 AND (last_completed_date IS NULL OR last_completed_date != :today))
+           OR (is_daily = 0 AND is_completed = 0)
+        """
+    )
+    suspend fun pendingCount(today: String): Int
 
     @Insert
     suspend fun insert(todo: Todo): Long
@@ -29,4 +49,12 @@ interface TodoDao {
 
     @Delete
     suspend fun delete(todo: Todo)
+
+    /** 单次任务：直接改完成位 */
+    @Query("UPDATE todos SET is_completed = :completed WHERE id = :id")
+    suspend fun setCompleted(id: Long, completed: Boolean)
+
+    /** 每日任务：只记录完成日期，传 null 表示撤销 */
+    @Query("UPDATE todos SET last_completed_date = :date WHERE id = :id")
+    suspend fun setLastCompletedDate(id: Long, date: String?)
 }

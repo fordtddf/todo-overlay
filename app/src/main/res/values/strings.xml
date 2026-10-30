@@ -12,6 +12,19 @@
     <string name="overlay_title">今日待办</string>
     <string name="overlay_countdown">%1$d 秒后关闭</string>
     <string name="overlay_more">还有 %1$d 项未显示</string>
+    <string name="overlay_completed">已记录，即将关闭</string>
+    <string name="overlay_tap_hint">点一下即可完成</string>
+    <string name="overlay_daily_prefix">每日 · %1$s</string>
+
+    <!-- 列表页 -->
+    <string name="todo_add_title">添加待办</string>
+    <string name="todo_edit_title">编辑待办</string>
+    <string name="todo_daily_switch">设为每日提醒</string>
+    <string name="todo_daily_desc">每天自动回到未完成，适合习惯类事项</string>
+    <string name="todo_daily_badge">每日</string>
+    <string name="action_save">保存</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_delete">删除</string>
 
     <!-- 设置页 -->
     <string name="settings_title">设置</string>

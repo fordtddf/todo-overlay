@@ -1,18 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 单条待办：一个圆点 + 一行文字，保持极简 -->
+<!--
+  卡片里的单条待办：复选框 + 文字。
+  CheckBox 自身不接收点击（clickable/focusable 都为 false），
+  整行的点击交给外层 LinearLayout 处理，点哪都能勾上。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_item"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:background="?android:attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="false"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingTop="5dp"
-    android:paddingBottom="5dp">
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
 
-    <View
-        android:layout_width="5dp"
-        android:layout_height="5dp"
-        android:layout_marginEnd="10dp"
-        android:background="@drawable/shape_dot" />
+    <CheckBox
+        android:id="@+id/cb_item"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:buttonTint="#8AB4F8"
+        android:clickable="false"
+        android:focusable="false"
+        android:minWidth="0dp"
+        android:minHeight="0dp"
+        android:paddingStart="0dp"
+        android:paddingEnd="8dp" />
 
     <TextView
         android:id="@+id/tv_item"

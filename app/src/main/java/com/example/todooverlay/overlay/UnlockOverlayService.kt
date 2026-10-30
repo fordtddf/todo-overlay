@@ -103,13 +103,22 @@ class UnlockOverlayService : Service() {
 
             val dao = app.database.todoDao()
             val today = Today.key()
-            val pending = dao.pendingForDate(today, OverlayManager.MAX_ITEMS)
+            val pending = dao.pendingForOverlay(today, OverlayManager.MAX_ITEMS)
 
-            // 今天没有未完成事项就不打扰
+            // 没有未完成事项就不打扰
             if (pending.isEmpty()) return@launch
 
             val total = dao.pendingCount(today)
-            overlayManager.show(pending.map { it.title }, total, settings.durationSeconds)
+            overlayManager.show(pending, total, settings.durationSeconds) { todo, done ->
+                // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位
+                scope.launch {
+                    if (todo.isDaily) {
+                        dao.setLastCompletedDate(todo.id, if (done) today else null)
+                    } else {
+                        dao.setCompleted(todo.id, done)
+                    }
+                }
+            }
             watchForIncomingCall(settings.durationSeconds)
         }
     }

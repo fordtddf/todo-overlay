@@ -14,12 +14,25 @@
 
 ## 功能
 
-- 解锁屏幕自动弹出今日未完成事项（最多 5 条）
+- 解锁屏幕自动弹出未完成事项（最多 5 条）
+- **卡片上直接勾选完成**，文字立刻划线置灰，实时写回数据库
+- 手指按住卡片时暂停倒计时，勾选后停留 1.8 秒再淡出
 - 顶部倒计时进度条 + 剩余秒数
 - 显示时长 3~15 秒可调，默认 5 秒
-- 卡片显示期间**完全不拦截触摸**
+- 卡片只在自己矩形内接收点击，**卡片以外的区域完全穿透**，绝不挡桌面图标
 - 通话中不打扰，显示期间来电立即收回
 - 开机自启，重启后自动恢复监听
+
+## 两类任务
+
+| | 每日提醒 | 单次任务 |
+|---|---|---|
+| 跨日行为 | 第二天自动回到未完成 | 保持未完成，一直提醒 |
+| 完成判定 | `last_completed_date == 今天` | `is_completed == true` |
+| 适用 | 吃药、背单词、喝水 | 交房租、修自行车 |
+
+跨日**不使用任何定时任务**，而是在每次读取时拿当前日期现算。
+好处是即使手机整夜关机、App 被系统冻结，第二天打开也一定是对的。
 
 ## 截图
 
@@ -108,13 +121,19 @@ Android 13+ 动态注册**必须**用 `RECEIVER_EXPORTED`。
 
 ### 2. 背景模糊会拦截触摸（本项目最大的坑）
 
-`FLAG_NOT_TOUCHABLE` 只保证触摸穿透到下层，但 Android 12+ 的
-`BlockUntrustedTouches` 会丢弃穿过「不透明度 > 0.8 的非可信悬浮窗」的触摸。
+卡片现在需要在自身上勾选，所以窗口是可点击的：
 
-而 `FLAG_BLUR_BEHIND` 会让系统在悬浮窗下铺一层 `Dim Layer` 遮罩，
-**这层遮罩不透明度超阈值，于是所有触摸被丢弃**。
+```
+FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL | FLAG_WATCH_OUTSIDE_TOUCH
+```
 
-日志特征：
+`NOT_TOUCH_MODAL` 保证窗口矩形之外的触摸照常交给下层桌面，
+`WATCH_OUTSIDE_TOUCH` 让我们能感知「点到外面了」并顺手收起卡片。
+
+**绝对不要加 `FLAG_BLUR_BEHIND`。** 之前做毛玻璃时踩过：
+Android 12+ 会为模糊在窗口下铺一层 `Dim Layer`，这层遮罩的不透明度
+超过 `BlockUntrustedTouches` 的阈值，结果是**整块屏幕的触摸都被丢弃**，
+看起来就像卡片把屏幕锁死了。日志特征：
 
 ```
 InputDispatcher: Untrusted touch due to occlusion by /1000/Dim Layer
@@ -122,7 +141,7 @@ InputDispatcher: Dropping untrusted touch event due to /1000
 ```
 
 排查时注意拦截者名字：是自己的包名才是窗口 alpha 问题，是 `Dim Layer`
-就是模糊或系统遮罩。**结论：不要用 `setBlurBehindRadius`。**
+就是模糊或系统遮罩。降低卡片 alpha 是没用的 —— 拦住你的根本不是卡片。
 
 ### 3. 快速连续解锁会叠卡片
 
