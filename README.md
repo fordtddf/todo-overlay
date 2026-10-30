@@ -40,9 +40,11 @@
 
 ## 安装
 
-从 [Releases](../../releases) 下载最新 APK，传到手机点击安装。
+**[下载最新版 APK](https://github.com/fordtddf/todo-overlay/releases/latest)**，传到手机点击安装。
 
 > 首次安装需允许「未知来源应用」。这是所有侧载 APK 的必经步骤。
+>
+> 已装旧版本可直接覆盖安装，待办数据会保留（含数据库迁移）。
 
 ## 使用前必须配置
 
