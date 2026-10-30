@@ -10,8 +10,11 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TodoDao {
 
-    /** 列表页：全部任务，不按日期过滤 —— 单次任务跨日必须留着 */
-    @Query("SELECT * FROM todos ORDER BY created_at ASC")
+    /**
+     * 列表页：全部任务，不按日期过滤 —— 单次任务跨日必须留着。
+     * 排序交给 [TodoOrdering]，SQL 里不再重复写一套规则。
+     */
+    @Query("SELECT * FROM todos")
     fun observeAll(): Flow<List<Todo>>
 
     /**
@@ -26,7 +29,6 @@ interface TodoDao {
         SELECT * FROM todos
         WHERE (is_daily = 1 AND (last_completed_date IS NULL OR last_completed_date != :today))
            OR (is_daily = 0 AND is_completed = 0)
-        ORDER BY is_daily ASC, created_at ASC
         """
     )
     suspend fun pendingForOverlay(today: String): List<Todo>

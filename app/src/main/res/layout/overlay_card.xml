@@ -4,7 +4,8 @@
   列表放在 MaxHeightScrollView 里：条目少时卡片自适应收缩，
   条目多时封顶在屏幕高度一半以内并可以上下滑动。
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<com.example.todooverlay.overlay.TouchObservingLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/card_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -77,4 +78,4 @@
         android:progress="1000"
         android:progressDrawable="@drawable/progress_overlay" />
 
-</LinearLayout>
+</com.example.todooverlay.overlay.TouchObservingLayout>

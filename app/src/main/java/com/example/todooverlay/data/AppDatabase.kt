@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Todo::class], version = 2, exportSchema = false)
+@Database(entities = [Todo::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun todoDao(): TodoDao
@@ -51,6 +51,42 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2 → v3：增加自定义排序权重 order_index。
+         *
+         * 老数据没有权重概念，直接拿 created_at 当初始值，
+         * 排序结果与升级前保持一致（先建的排前面）。
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `todos_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `is_daily` INTEGER NOT NULL,
+                        `last_completed_date` TEXT,
+                        `is_completed` INTEGER NOT NULL,
+                        `created_at` INTEGER NOT NULL,
+                        `order_index` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `todos_new`
+                        (`id`, `title`, `is_daily`, `last_completed_date`,
+                         `is_completed`, `created_at`, `order_index`)
+                    SELECT `id`, `title`, `is_daily`, `last_completed_date`,
+                           `is_completed`, `created_at`, `created_at`
+                    FROM `todos`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `todos`")
+                db.execSQL("ALTER TABLE `todos_new` RENAME TO `todos`")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -58,7 +94,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "todo.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

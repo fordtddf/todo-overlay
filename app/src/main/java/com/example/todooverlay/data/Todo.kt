@@ -30,7 +30,11 @@ data class Todo(
     val isCompleted: Boolean = false,
 
     @ColumnInfo(name = "created_at")
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+
+    /** 自定义权重，值越小越靠前。默认取创建时刻，等于「先建先显示」 */
+    @ColumnInfo(name = "order_index")
+    val orderIndex: Long = System.currentTimeMillis()
 ) {
 
     /**

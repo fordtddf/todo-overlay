@@ -22,9 +22,20 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import com.example.todooverlay.R
+import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.Todo
 import kotlin.math.ceil
 import kotlin.math.min
+
+/** 一次展示所需的全部参数，由 Service 从 SettingsStore 映射过来 */
+data class OverlayConfig(
+    val durationSeconds: Int,
+    val autoScroll: Boolean,
+    val scrollMode: ScrollMode,
+    val speedDpPerSec: Int,
+    val widthPercent: Int,
+    val maxHeightDp: Int
+)
 
 /**
  * 解锁悬浮卡片。
@@ -32,12 +43,12 @@ import kotlin.math.min
  * 窗口只在自己的卡片矩形内接收触摸（FLAG_NOT_TOUCH_MODAL），
  * 卡片以外的区域完全穿透给下层桌面/应用。
  *
- * 卡片**不会**因为用户点了外面而关闭 —— 只有两种情况会消失：
- * ① 倒计时自然走完；② 用户点了卡片右上角的关闭按钮。
+ * 卡片只会因为两件事消失：倒计时走完，或用户点了右上角关闭按钮。
+ * 点卡片外面**不会**关闭它。
  *
  * 注意：不要加 FLAG_BLUR_BEHIND。Android 12+ 上系统会为模糊在窗口下铺一层
  * Dim Layer，那层遮罩的不透明度超过 BlockUntrustedTouches 的阈值，
- * 结果是整块屏幕的触摸都被丢弃（日志：Untrusted touch due to occlusion by Dim Layer）。
+ * 结果是整块屏幕的触摸都被丢弃。
  */
 class OverlayManager(context: Context) {
 
@@ -48,45 +59,49 @@ class OverlayManager(context: Context) {
 
     private var rootView: View? = null
     private var countdown: ValueAnimator? = null
-    private var closeRunnable: Runnable? = null
+    private var scroller: OverlayScroller? = null
+    private var currentConfig: OverlayConfig? = null
 
-    /** 用户已经在卡片上勾选过，之后只等淡出，不再恢复自动倒计时 */
+    private var closeRunnable: Runnable? = null
+    private var resumeRunnable: Runnable? = null
+
+    /** 用户已经在卡片上勾选过，之后只等淡出，不再恢复滚动和倒计时 */
     private var completionTriggered = false
 
-    /**
-     * 展示全部待完成事项。[todos] 已按「每日优先 + 创建时间」排好序。
-     * [onToggle] 在用户点选某一条时回调，第二个参数是勾选后的状态。
-     */
     fun show(
         todos: List<Todo>,
-        durationSeconds: Int,
+        config: OverlayConfig,
         onToggle: (Todo, Boolean) -> Unit
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { show(todos, durationSeconds, onToggle) }
+            mainHandler.post { show(todos, config, onToggle) }
             return
         }
-        // 上一次还没淡出完就又被解锁了：先干净移除，避免叠加
         removeImmediately()
         completionTriggered = false
 
         if (!Settings.canDrawOverlays(appContext)) return
 
         val view = LayoutInflater.from(appContext).inflate(R.layout.overlay_card, null)
-        bindContent(view, todos, durationSeconds, onToggle)
+        bindContent(view, todos, config, onToggle)
+        applySize(view, config)
         attachInteractionHandlers(view)
 
         view.alpha = 0f
         try {
-            windowManager.addView(view, buildParams())
+            windowManager.addView(view, buildParams(config))
         } catch (t: Throwable) {
-            // 权限被中途撤销 / BadToken / 窗口已失效，静默放弃本次展示
             return
         }
 
         rootView = view
+        currentConfig = config
         view.animate().alpha(1f).setDuration(FADE_IN_MS).start()
-        startCountdown(view, durationSeconds)
+
+        // 必须等布局完成才知道内容到底有多高、能滚多远
+        view.post {
+            if (rootView === view) startTimers(view, config)
+        }
     }
 
     /** 立即淡出。供服务在来电等情况下提前收回卡片。 */
@@ -106,12 +121,12 @@ class OverlayManager(context: Context) {
         removeImmediately()
     }
 
-    // ---------------------------------------------------------------- 内容绑定
+    // ---------------------------------------------------------------- 内容与尺寸
 
     private fun bindContent(
         view: View,
         todos: List<Todo>,
-        durationSeconds: Int,
+        config: OverlayConfig,
         onToggle: (Todo, Boolean) -> Unit
     ) {
         val container = view.findViewById<LinearLayout>(R.id.container_items)
@@ -128,7 +143,6 @@ class OverlayManager(context: Context) {
                 todo.title
             }
 
-            // 每行自己记住勾选状态，点击整行都能切换（复选框本身不接收点击）
             var checked = false
             row.setOnClickListener {
                 checked = !checked
@@ -139,19 +153,18 @@ class OverlayManager(context: Context) {
             container.addView(row)
         }
 
-        // 列表高度封顶：条目少时卡片自适应，条目多时在卡片内部滚动，
-        // 卡片整体尺寸保持和原来 5 条时一致
-        val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
-        scroll.maxHeight = min(dp(LIST_MAX_HEIGHT_DP), (screenHeight() * 0.5f).toInt())
-        attachInteractionHandlers(scroll)
-
         view.findViewById<TextView>(R.id.tv_countdown).text =
-            appContext.getString(R.string.overlay_countdown, durationSeconds)
+            appContext.getString(R.string.overlay_countdown, config.durationSeconds)
 
         view.findViewById<View>(R.id.btn_close).setOnClickListener { fadeOut() }
     }
 
-    /** 勾选后的即时视觉反馈：删除线 + 置灰，不等数据库回来 */
+    /** 卡片宽度按百分比、列表高度按用户设定，但都不超过半屏 */
+    private fun applySize(view: View, config: OverlayConfig) {
+        val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
+        scroll.maxHeight = min(dp(config.maxHeightDp), (screenHeight() * 0.5f).toInt())
+    }
+
     private fun applyRowState(checkBox: CheckBox, label: TextView, checked: Boolean) {
         checkBox.isChecked = checked
         label.paintFlags = if (checked) {
@@ -162,72 +175,51 @@ class OverlayManager(context: Context) {
         label.alpha = if (checked) 0.45f else 1f
     }
 
-    // ---------------------------------------------------------------- 交互
+    // ---------------------------------------------------------------- 计时
 
     /**
-     * 手指按住卡片（含列表区域）就暂停倒计时，抬手后重新给一段宽限时间。
+     * 布局完成后才能拿到真实的可滚动距离，所以计时和自动滚动都放在这里启动。
      *
-     * 注意这里**不处理** ACTION_OUTSIDE：点到卡片外面时卡片必须保持不动，
-     * 那一下点击由系统正常传给下层应用。
+     * 单遍模式的总时长按「顶部停顿 + 滚动耗时 + 底部停顿」算，
+     * 保证列表一定滚得完；不需要滚动时退回用户设置的固定时长。
      */
-    private fun attachInteractionHandlers(target: View) {
-        target.isClickable = true
-        target.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN ->
-                    if (!completionTriggered) countdown?.pause()
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    if (!completionTriggered) restartCountdownWithGrace()
-            }
-            false
+    private fun startTimers(view: View, config: OverlayConfig) {
+        val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
+        val distance = ((scroll.getChildAt(0)?.height ?: 0) - scroll.height).coerceAtLeast(0)
+        val speedPx = dp(config.speedDpPerSec)
+        val needScroll = config.autoScroll && distance > 0
+
+        if (needScroll) {
+            scroller = OverlayScroller(
+                scrollView = scroll,
+                speedPxPerSec = speedPx,
+                loop = config.scrollMode == ScrollMode.LOOP
+            ).also { it.start() }
         }
-    }
 
-    private fun onItemToggled(view: View) {
-        if (!completionTriggered) {
-            completionTriggered = true
-            cancelCountdown()
-            view.findViewById<TextView>(R.id.tv_countdown).text =
-                appContext.getString(R.string.overlay_completed)
+        val totalMs = when {
+            !needScroll -> config.durationSeconds * 1000L
+            config.scrollMode == ScrollMode.LOOP -> OverlayScroller.LOOP_MAX_MS
+            else -> OverlayScroller.singlePassTotalMs(distance, speedPx)
         }
-        // 每次勾选都重新计时，连续勾选时不会被中途关掉
-        scheduleClose()
+        startCountdown(view, totalMs)
     }
 
-    private fun scheduleClose() {
-        cancelScheduledClose()
-        val runnable = Runnable { fadeOut() }
-        closeRunnable = runnable
-        mainHandler.postDelayed(runnable, CLOSE_DELAY_MS)
-    }
-
-    private fun cancelScheduledClose() {
-        closeRunnable?.let { mainHandler.removeCallbacks(it) }
-        closeRunnable = null
-    }
-
-    // ---------------------------------------------------------------- 倒计时
-
-    /** 抬手后重新计时，避免用户刚滑完列表卡片就消失 */
-    private fun restartCountdownWithGrace() {
-        val view = rootView ?: return
-        startCountdown(view, GRACE_SECONDS)
-    }
-
-    private fun startCountdown(view: View, durationSeconds: Int) {
+    private fun startCountdown(view: View, totalMs: Long) {
         cancelCountdown()
 
         val progress = view.findViewById<ProgressBar>(R.id.progress)
         val label = view.findViewById<TextView>(R.id.tv_countdown)
+        val duration = totalMs.coerceAtLeast(1_000L)
 
         countdown = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = durationSeconds * 1000L
+            this.duration = duration
             interpolator = LinearInterpolator()
             var lastShown = -1
             addUpdateListener { animator ->
                 val elapsed = animator.animatedValue as Float
                 progress.progress = ((1f - elapsed) * progress.max).toInt()
-                val remaining = ceil((1f - elapsed) * durationSeconds).toInt().coerceAtLeast(0)
+                val remaining = ceil((1f - elapsed) * duration / 1000.0).toInt().coerceAtLeast(0)
                 if (remaining != lastShown) {
                     lastShown = remaining
                     label.text = appContext.getString(R.string.overlay_countdown, remaining)
@@ -251,13 +243,99 @@ class OverlayManager(context: Context) {
         animator.cancel()
     }
 
+    // ---------------------------------------------------------------- 手势
+
+    /**
+     * 手指按住（卡片任意位置，含列表内滑动）就暂停自动滚动和倒计时，
+     * 此时列表可以自由手动拖拽；抬手 2 秒后恢复。
+     *
+     * 不处理 ACTION_OUTSIDE —— 点卡片外面必须让卡片保持不动。
+     */
+    private fun attachInteractionHandlers(view: View) {
+        // 卡片空白处也要消费掉触摸，避免穿透到下层应用
+        view.isClickable = true
+        (view as? TouchObservingLayout)?.touchObserver = ::onTouchObserved
+    }
+
+    private fun onTouchObserved(event: MotionEvent) {
+        if (completionTriggered) return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                cancelResume()
+                scroller?.pause()
+                countdown?.pause()
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> scheduleResume()
+        }
+    }
+
+    private fun scheduleResume() {
+        cancelResume()
+        val runnable = Runnable { resumeInteraction() }
+        resumeRunnable = runnable
+        mainHandler.postDelayed(runnable, RESUME_DELAY_MS)
+    }
+
+    private fun cancelResume() {
+        resumeRunnable?.let { mainHandler.removeCallbacks(it) }
+        resumeRunnable = null
+    }
+
+    private fun resumeInteraction() {
+        val view = rootView ?: return
+        val config = currentConfig ?: return
+        scroller?.resume()
+
+        val needRecalc = scroller != null && config.scrollMode == ScrollMode.SINGLE
+        if (!needRecalc) {
+            // 循环模式或不需要滚动：接着走原来那根倒计时就行
+            countdown?.resume()
+            return
+        }
+
+        // 单遍模式按剩余距离重算，避免用户滑到一半松手后卡片立刻关闭
+        val scroll = view.findViewById<MaxHeightScrollView>(R.id.scroll_items)
+        val distance = ((scroll.getChildAt(0)?.height ?: 0) - scroll.height).coerceAtLeast(0)
+        val remainingPx = (distance - scroll.scrollY).coerceAtLeast(0)
+        val remainingMs = OverlayScroller.travelDurationMs(remainingPx, dp(config.speedDpPerSec)) +
+            OverlayScroller.BOTTOM_PAUSE_MS
+        startCountdown(view, remainingMs)
+    }
+
+    // ---------------------------------------------------------------- 勾选
+
+    private fun onItemToggled(view: View) {
+        if (!completionTriggered) {
+            completionTriggered = true
+            scroller?.stop()
+            cancelCountdown()
+            cancelResume()
+            view.findViewById<TextView>(R.id.tv_countdown).text =
+                appContext.getString(R.string.overlay_completed)
+        }
+        // 连续勾选时重新计时，不会被中途关掉
+        scheduleClose()
+    }
+
+    private fun scheduleClose() {
+        cancelScheduledClose()
+        val runnable = Runnable { fadeOut() }
+        closeRunnable = runnable
+        mainHandler.postDelayed(runnable, CLOSE_DELAY_MS)
+    }
+
+    private fun cancelScheduledClose() {
+        closeRunnable?.let { mainHandler.removeCallbacks(it) }
+        closeRunnable = null
+    }
+
     // ---------------------------------------------------------------- 视图移除
 
     private fun fadeOut() {
         val view = rootView ?: return
         rootView = null
-        cancelCountdown()
-        cancelScheduledClose()
+        cleanupTimers()
         view.animate()
             .alpha(0f)
             .setDuration(FADE_OUT_MS)
@@ -268,10 +346,17 @@ class OverlayManager(context: Context) {
     private fun removeImmediately() {
         val view = rootView ?: return
         rootView = null
-        cancelCountdown()
-        cancelScheduledClose()
+        cleanupTimers()
         view.animate().cancel()
         safeRemove(view)
+    }
+
+    private fun cleanupTimers() {
+        cancelCountdown()
+        cancelScheduledClose()
+        cancelResume()
+        scroller?.stop()
+        scroller = null
     }
 
     private fun safeRemove(view: View) {
@@ -284,14 +369,15 @@ class OverlayManager(context: Context) {
 
     // ---------------------------------------------------------------- 窗口参数
 
-    private fun buildParams(): WindowManager.LayoutParams {
+    private fun buildParams(config: OverlayConfig): WindowManager.LayoutParams {
+        val width = (screenWidth() * config.widthPercent / 100f).toInt()
         val params = WindowManager.LayoutParams(
-            screenWidth() - dp(SIDE_MARGIN_DP) * 2,
+            width,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // 不加 FLAG_NOT_TOUCHABLE：卡片要能接收点击。
             // FLAG_NOT_TOUCH_MODAL 保证窗口矩形之外的触摸照常交给下层应用。
-            // 不要加 FLAG_WATCH_OUTSIDE_TOUCH —— 那会让我们把「点了外面」当成关闭信号。
+            // 不要加 FLAG_WATCH_OUTSIDE_TOUCH —— 那会把「点了外面」当成关闭信号。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -302,24 +388,18 @@ class OverlayManager(context: Context) {
         return params
     }
 
-    private fun screenWidth(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            windowManager.currentWindowMetrics.bounds.width()
-        } else {
-            val metrics = DisplayMetrics()
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.getRealMetrics(metrics)
-            metrics.widthPixels
-        }
+    private fun screenWidth(): Int = windowMetrics().width()
 
-    private fun screenHeight(): Int =
+    private fun screenHeight(): Int = windowMetrics().height()
+
+    private fun windowMetrics(): android.graphics.Rect =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            windowManager.currentWindowMetrics.bounds.height()
+            windowManager.currentWindowMetrics.bounds
         } else {
             val metrics = DisplayMetrics()
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.getRealMetrics(metrics)
-            metrics.heightPixels
+            android.graphics.Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
         }
 
     private fun dp(value: Int): Int =
@@ -328,16 +408,12 @@ class OverlayManager(context: Context) {
     companion object {
         private const val FADE_IN_MS = 180L
         private const val FADE_OUT_MS = 260L
-        private const val SIDE_MARGIN_DP = 12
         private const val TOP_MARGIN_DP = 52
 
-        /** 列表区域的最大高度，约等于原来 5 条时的高度，卡片整体尺寸不变 */
-        private const val LIST_MAX_HEIGHT_DP = 150
+        /** 勾选后停留多久再淡出 */
+        private const val CLOSE_DELAY_MS = 1500L
 
-        /** 勾选后停留多久再淡出，留出看清反馈的时间 */
-        private const val CLOSE_DELAY_MS = 1800L
-
-        /** 手指离开卡片后重新计时的秒数 */
-        private const val GRACE_SECONDS = 4
+        /** 手指抬起后多久恢复自动滚动 */
+        private const val RESUME_DELAY_MS = 2000L
     }
 }

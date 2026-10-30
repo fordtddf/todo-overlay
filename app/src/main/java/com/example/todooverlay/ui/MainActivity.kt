@@ -12,6 +12,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +76,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.todooverlay.R
 import com.example.todooverlay.TodoApp
+import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.SettingsStore
 import com.example.todooverlay.data.Todo
 import com.example.todooverlay.data.Today
@@ -409,9 +413,20 @@ private fun SettingsScreen(
     val overlayEnabled by vm.overlayEnabled.collectAsStateWithLifecycle()
     val duration by vm.durationSeconds.collectAsStateWithLifecycle()
 
+    val autoScroll by vm.autoScrollEnabled.collectAsStateWithLifecycle()
+    val mode by vm.scrollMode.collectAsStateWithLifecycle()
+    val speed by vm.scrollSpeed.collectAsStateWithLifecycle()
+    val widthPercent by vm.cardWidthPercent.collectAsStateWithLifecycle()
+    val heightDp by vm.cardMaxHeightDp.collectAsStateWithLifecycle()
+
     // DataStore 首次发射前给默认值，避免 Composable 提前 return 造成布局抖动
     val enabled = overlayEnabled ?: true
     val seconds = duration ?: SettingsStore.DEFAULT_SECONDS
+    val autoScrollOn = autoScroll ?: SettingsStore.DEFAULT_AUTO_SCROLL
+    val scrollMode = mode ?: SettingsStore.DEFAULT_SCROLL_MODE
+    val speedValue = speed ?: SettingsStore.DEFAULT_SPEED
+    val cardWidth = widthPercent ?: SettingsStore.DEFAULT_WIDTH_PERCENT
+    val cardHeight = heightDp ?: SettingsStore.DEFAULT_HEIGHT_DP
 
     // epoch 变化（从系统设置返回）时重新探测权限
     val canOverlay = remember(epoch) { PermissionHelper.canDrawOverlays(context) }
@@ -447,6 +462,8 @@ private fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // 设置项变多了，小屏上要能滚动
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -529,6 +546,166 @@ private fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            // ---------------- 自动滚动 ----------------
+            SettingCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("解锁弹窗自动滚动", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "内容超出一屏时自动匀速滚动",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoScrollOn,
+                        onCheckedChange = { vm.setAutoScrollEnabled(it) }
+                    )
+                }
+
+                if (autoScrollOn) {
+                    Text(
+                        "滚动模式",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChoiceChip("单遍", scrollMode == ScrollMode.SINGLE) {
+                            vm.setScrollMode(ScrollMode.SINGLE)
+                        }
+                        ChoiceChip("循环", scrollMode == ScrollMode.LOOP) {
+                            vm.setScrollMode(ScrollMode.LOOP)
+                        }
+                    }
+                    Text(
+                        if (scrollMode == ScrollMode.SINGLE) {
+                            "滚到底部停顿 2 秒后自动关闭"
+                        } else {
+                            "到底部停顿后回滚到顶部继续，最长 18 秒兜底关闭"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Text(
+                        "滚动速度",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChoiceChip("慢速 25", speedValue == SettingsStore.SPEED_SLOW) {
+                            vm.setScrollSpeed(SettingsStore.SPEED_SLOW)
+                        }
+                        ChoiceChip("适中 40", speedValue == SettingsStore.SPEED_NORMAL) {
+                            vm.setScrollSpeed(SettingsStore.SPEED_NORMAL)
+                        }
+                        ChoiceChip("快速 60", speedValue == SettingsStore.SPEED_FAST) {
+                            vm.setScrollSpeed(SettingsStore.SPEED_FAST)
+                        }
+                    }
+                    Text(
+                        "单位 dp/秒。速度只影响自动滚动，单遍模式的总时长会自动跟着重算",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // ---------------- 卡片尺寸 ----------------
+            SettingCard {
+                Text("悬浮卡片尺寸", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "改动即时保存，下次弹窗生效",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 12.dp)
+                ) {
+                    ChoiceChip(
+                        "紧凑",
+                        cardWidth == SettingsStore.PRESET_S_WIDTH &&
+                            cardHeight == SettingsStore.PRESET_S_HEIGHT
+                    ) {
+                        vm.applyCardPreset(
+                            SettingsStore.PRESET_S_WIDTH,
+                            SettingsStore.PRESET_S_HEIGHT
+                        )
+                    }
+                    ChoiceChip(
+                        "默认",
+                        cardWidth == SettingsStore.PRESET_M_WIDTH &&
+                            cardHeight == SettingsStore.PRESET_M_HEIGHT
+                    ) {
+                        vm.applyCardPreset(
+                            SettingsStore.PRESET_M_WIDTH,
+                            SettingsStore.PRESET_M_HEIGHT
+                        )
+                    }
+                    ChoiceChip(
+                        "宽大",
+                        cardWidth == SettingsStore.PRESET_L_WIDTH &&
+                            cardHeight == SettingsStore.PRESET_L_HEIGHT
+                    ) {
+                        vm.applyCardPreset(
+                            SettingsStore.PRESET_L_WIDTH,
+                            SettingsStore.PRESET_L_HEIGHT
+                        )
+                    }
+                }
+
+                var widthSlider by remember(cardWidth) {
+                    mutableFloatStateOf(cardWidth.toFloat())
+                }
+                Text(
+                    "宽度 ${widthSlider.roundToInt()}% 屏宽",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+                Slider(
+                    value = widthSlider,
+                    onValueChange = { widthSlider = it },
+                    onValueChangeFinished = { vm.setCardWidthPercent(widthSlider.roundToInt()) },
+                    valueRange = SettingsStore.MIN_WIDTH_PERCENT.toFloat()..
+                        SettingsStore.MAX_WIDTH_PERCENT.toFloat(),
+                    steps = SettingsStore.MAX_WIDTH_PERCENT - SettingsStore.MIN_WIDTH_PERCENT - 1
+                )
+
+                var heightSlider by remember(cardHeight) {
+                    mutableFloatStateOf(cardHeight.toFloat())
+                }
+                Text(
+                    "最大高度 ${heightSlider.roundToInt()} dp",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Slider(
+                    value = heightSlider,
+                    onValueChange = { heightSlider = it },
+                    // 10dp 一档：180、190 … 420 共 25 个位置
+                    onValueChangeFinished = {
+                        vm.setCardMaxHeightDp(
+                            (heightSlider / 10).roundToInt() * 10
+                        )
+                    },
+                    valueRange = SettingsStore.MIN_HEIGHT_DP.toFloat()..
+                        SettingsStore.MAX_HEIGHT_DP.toFloat(),
+                    steps = (SettingsStore.MAX_HEIGHT_DP - SettingsStore.MIN_HEIGHT_DP) / 10 - 1
+                )
+                Text(
+                    "任务少时卡片按内容自适应，超过这个高度才出现滚动",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(
+                    onClick = { vm.resetCardSize() },
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("恢复默认尺寸")
                 }
             }
 
@@ -642,6 +819,15 @@ private fun appVersionName(context: Context): String = try {
     "${info.versionName} (${info.longVersionCode})"
 } catch (t: Throwable) {
     "未知"
+}
+
+@Composable
+private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) }
+    )
 }
 
 @Composable

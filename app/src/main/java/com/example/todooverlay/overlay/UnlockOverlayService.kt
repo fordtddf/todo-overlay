@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.example.todooverlay.R
 import com.example.todooverlay.TodoApp
 import com.example.todooverlay.data.Today
+import com.example.todooverlay.data.TodoOrdering
 import com.example.todooverlay.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -103,12 +104,23 @@ class UnlockOverlayService : Service() {
 
             val dao = app.database.todoDao()
             val today = Today.key()
-            val pending = dao.pendingForOverlay(today)
+            // 与主界面共用同一个比较器，避免两处排序规则跑偏
+            val pending = TodoOrdering.sorted(dao.pendingForOverlay(today), today)
 
             // 没有未完成事项就不打扰
             if (pending.isEmpty()) return@launch
 
-            overlayManager.show(pending, settings.durationSeconds) { todo, done ->
+            overlayManager.show(
+                todos = pending,
+                config = OverlayConfig(
+                    durationSeconds = settings.durationSeconds,
+                    autoScroll = settings.autoScroll,
+                    scrollMode = settings.scrollMode,
+                    speedDpPerSec = settings.scrollSpeedDpPerSec,
+                    widthPercent = settings.cardWidthPercent,
+                    maxHeightDp = settings.cardMaxHeightDp
+                )
+            ) { todo, done ->
                 // 卡片上的勾选立刻落库：每日任务记日期，单次任务改完成位
                 scope.launch {
                     if (todo.isDaily) {
@@ -118,7 +130,7 @@ class UnlockOverlayService : Service() {
                     }
                 }
             }
-            watchForIncomingCall(settings.durationSeconds)
+            watchForIncomingCall()
         }
     }
 
@@ -126,10 +138,11 @@ class UnlockOverlayService : Service() {
      * 卡片显示期间如果来了电话，立刻收回，别挡住来电界面。
      * 只在卡片存活的这几秒内轮询，结束后自动停。
      */
-    private fun watchForIncomingCall(durationSeconds: Int) {
+    private fun watchForIncomingCall() {
         callWatchJob?.cancel()
         callWatchJob = scope.launch {
-            repeat(durationSeconds * 2) {
+            // 卡片最长可能显示 18 秒（循环模式），多留一点余量
+            repeat(CALL_WATCH_TICKS) {
                 delay(500)
                 if (isInCall()) {
                     overlayManager.dismiss()
@@ -202,6 +215,9 @@ class UnlockOverlayService : Service() {
         private const val TAG = "UnlockOverlayService"
         private const val CHANNEL_ID = "unlock_overlay"
         private const val NOTIFICATION_ID = 1001
+
+        /** 来电轮询次数：500ms 一次，共 25 秒，覆盖循环模式的最长展示时间 */
+        private const val CALL_WATCH_TICKS = 50
 
         const val ACTION_PREVIEW = "com.example.todooverlay.action.PREVIEW"
     }
