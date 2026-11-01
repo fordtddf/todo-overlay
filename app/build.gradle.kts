@@ -42,6 +42,14 @@ android {
         targetSdk = 34
         versionCode = 13
         versionName = "1.6.1"
+
+        // 真机（小米 15）只有 arm64-v8a，剔除其余架构（当前无原生库，属预防性锁定）
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
+        // 只保留中文资源，剔除 AndroidX/Compose 自带的 70+ 国语言翻译
+        resourceConfigurations += listOf("zh-rCN")
     }
 
     signingConfigs {
@@ -57,7 +65,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
