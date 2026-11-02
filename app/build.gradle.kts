@@ -40,8 +40,8 @@ android {
         applicationId = "com.example.todooverlay"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.6.1"
+        versionCode = 14
+        versionName = "1.6.2"
 
         // 真机（小米 15）只有 arm64-v8a，剔除其余架构（当前无原生库，属预防性锁定）
         ndk {
