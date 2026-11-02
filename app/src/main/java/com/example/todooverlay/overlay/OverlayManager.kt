@@ -13,13 +13,15 @@ import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.widget.CheckBox
 import android.widget.EditText
@@ -33,6 +35,7 @@ import com.example.todooverlay.data.ScrollMode
 import com.example.todooverlay.data.TimeFormat
 import com.example.todooverlay.data.Todo
 import com.example.todooverlay.data.Word
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.min
 
@@ -100,7 +103,14 @@ class OverlayManager(context: Context) {
 
     /** 保存窗口参数，快速记一笔时需要临时改 flags 再 updateViewLayout */
     private var rootParams: WindowManager.LayoutParams? = null
-    private var flingDetector: GestureDetector? = null
+
+    // 上滑关闭的手势跟踪状态（在 dispatchTouchEvent 旁路里更新，见 handleFlingGesture）
+    private var velocityTracker: VelocityTracker? = null
+    private var gestureStartX = 0f
+    private var gestureStartY = 0f
+    private var gestureDy = 0f
+    private var gestureActive = false
+    private var gestureScroll: MaxHeightScrollView? = null
 
     /** 用户已经在卡片上勾选过，之后只等淡出，不再恢复滚动和倒计时 */
     private var completionTriggered = false
@@ -580,46 +590,138 @@ class OverlayManager(context: Context) {
     private fun attachInteractionHandlers(view: View, config: OverlayConfig) {
         // 卡片空白处也要消费掉触摸，避免穿透到下层应用
         view.isClickable = true
+        // 上滑关闭和「按住暂停」共用同一条旁路通道：OnTouchListener 在列表区域收不到事件，
+        // 只有 dispatchTouchEvent 能看到全部触摸（见 TouchObservingLayout 的注释）
         (view as? TouchObservingLayout)?.touchObserver = ::onTouchObserved
+    }
 
+    /**
+     * 上滑关闭。只在旁路里观察，不消费事件，ScrollView 照常滚动。
+     *
+     * 关键的一道仲裁：列表还没滚到顶部时，上滑属于「滚列表」，不算关闭手势。
+     * 否则用户正常翻列表时速度快一点，卡片就被误关了。
+     * 一口气滑到顶再继续上滑，才会接管成关闭手势 —— 和 iOS 面板的行为一致。
+     *
+     * 接管之后同时看速度和距离：快速甩上去直接关，慢慢拖过卡片高度的 1/4 也关。
+     * 拖动过程中卡片跟着手指走（阻尼位移），没达到阈值就弹回原位。
+     */
+    private fun handleFlingGesture(event: MotionEvent) {
+        val config = currentConfig ?: return
         if (!config.flingToDismiss) return
+        val view = rootView ?: return
+        val slop = dp(FLING_SLOP_DP).toFloat()
 
-        // 上滑甩飞关闭。GestureDetector 只做识别，事件照常往下分发
-        flingDetector = GestureDetector(appContext, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onFling(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                velocityX: Float,
-                velocityY: Float
-            ): Boolean {
-                if (velocityY < -FLING_VELOCITY_THRESHOLD) {
-                    flingUpAndDismiss()
-                    return true
-                }
-                return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gestureStartX = event.rawX
+                gestureStartY = event.rawY
+                gestureDy = 0f
+                gestureActive = false
+                gestureScroll = view.findViewById(R.id.scroll_items)
+                velocityTracker?.recycle()
+                velocityTracker = VelocityTracker.obtain().apply { addMovement(event) }
             }
-        })
-        view.setOnTouchListener { _, event ->
-            flingDetector?.onTouchEvent(event)
-            false
+
+            MotionEvent.ACTION_MOVE -> {
+                val tracker = velocityTracker ?: return
+                tracker.addMovement(event)
+                val dx = event.rawX - gestureStartX
+
+                if (!gestureActive) {
+                    // 列表还能往上滚，这次滑动归 ScrollView。每帧重置基准，
+                    // 于是「滑到顶的那一刻」自然成为新的起点，之前的位移不计入
+                    if ((gestureScroll?.scrollY ?: 0) > 0) {
+                        gestureStartY = event.rawY
+                        gestureDy = 0f
+                        return
+                    }
+                    gestureDy = event.rawY - gestureStartY
+                    if (-gestureDy > slop && -gestureDy > abs(dx) * FLING_VERTICAL_BIAS) {
+                        gestureActive = true
+                    } else if (abs(dx) > slop) {
+                        // 横向为主，不是上滑手势，本次序列放弃
+                        tracker.recycle()
+                        velocityTracker = null
+                        return
+                    }
+                } else {
+                    gestureDy = event.rawY - gestureStartY
+                }
+                if (gestureActive) applyFollow(view)
+            }
+
+            MotionEvent.ACTION_UP -> {
+                val tracker = velocityTracker
+                velocityTracker = null
+                if (tracker == null || !gestureActive) {
+                    tracker?.recycle()
+                    settleBack(view)
+                    return
+                }
+                tracker.addMovement(event)
+                tracker.computeCurrentVelocity(1000)
+                val vy = tracker.yVelocity
+                tracker.recycle()
+
+                val minDistance = dp(FLING_DISTANCE_MIN_DP).toFloat()
+                val farEnough = -gestureDy > maxOf(view.height * FLING_DISTANCE_RATIO, minDistance)
+                if (vy < -FLING_VELOCITY_THRESHOLD || farEnough) {
+                    flingUpAndDismiss()
+                } else {
+                    settleBack(view)
+                }
+                gestureActive = false
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                velocityTracker?.recycle()
+                velocityTracker = null
+                settleBack(view)
+                gestureActive = false
+            }
         }
     }
 
-    /** 上滑关闭：卡片整体向上滑出并淡出 */
+    /** 跟手位移：阻尼系数让卡片滞后于手指，最多提起 48dp */
+    private fun applyFollow(view: View) {
+        val maxFollow = dp(FLING_FOLLOW_MAX_DP).toFloat()
+        val offset = (gestureDy * FLING_FOLLOW_DAMPING).coerceIn(-maxFollow, 0f)
+        view.translationY = offset
+        val progress = -offset / dp(FLING_FOLLOW_MAX_DP).toFloat()
+        view.alpha = 1f - progress * FLING_FOLLOW_FADE
+    }
+
+    /** 没达到关闭阈值：弹回原位，恢复不透明 */
+    private fun settleBack(view: View) {
+        if (view.translationY == 0f && view.alpha == 1f) return
+        view.animate()
+            .translationY(0f)
+            .alpha(1f)
+            .setDuration(FLING_SETTLE_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    /** 上滑关闭：从当前跟手位置继续向上加速滑出并淡出 */
     private fun flingUpAndDismiss() {
         val view = rootView ?: return
         rootView = null
         cleanupTimers()
+        view.animate().cancel()
         view.animate()
             .translationY(-view.height.toFloat() - dp(FLING_EXIT_DP))
             .alpha(0f)
             .setDuration(FLING_EXIT_MS)
+            .setInterpolator(AccelerateInterpolator())
             .withEndAction { safeRemove(view) }
             .start()
     }
 
     private fun onTouchObserved(event: MotionEvent) {
         if (completionTriggered) return
+        handleFlingGesture(event)
+        // 上滑已经关掉了卡片，别再给已移除的视图排恢复任务
+        if (rootView == null) return
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 cancelResume()
@@ -718,7 +820,10 @@ class OverlayManager(context: Context) {
         cancelResume()
         scroller?.stop()
         scroller = null
-        flingDetector = null
+        velocityTracker?.recycle()
+        velocityTracker = null
+        gestureActive = false
+        gestureScroll = null
         rootParams = null
     }
 
@@ -806,10 +911,26 @@ class OverlayManager(context: Context) {
         /** 手指抬起后多久恢复自动滚动 */
         private const val RESUME_DELAY_MS = 2000L
 
-        /** 上滑甩飞关闭的触发速度（px/s） */
-        private const val FLING_VELOCITY_THRESHOLD = 1000f
+        /** 上滑甩飞关闭的触发速度（px/s），降到 700 让轻甩也能命中 */
+        private const val FLING_VELOCITY_THRESHOLD = 700f
 
-        private const val FLING_EXIT_MS = 220L
+        /** 慢速拖动也算关闭：上滑超过卡片高度的这个比例，且不低于 60dp */
+        private const val FLING_DISTANCE_RATIO = 0.25f
+        private const val FLING_DISTANCE_MIN_DP = 60
+
+        /** 判定为垂直上滑的起手位移（dp），以及垂直方向相对横向的倍数要求 */
+        private const val FLING_SLOP_DP = 8
+        private const val FLING_VERTICAL_BIAS = 1.2f
+
+        /** 跟手：位移阻尼系数、最大提起高度（dp）、最多淡到多少不透明度 */
+        private const val FLING_FOLLOW_DAMPING = 0.2f
+        private const val FLING_FOLLOW_MAX_DP = 48
+        private const val FLING_FOLLOW_FADE = 0.25f
+
+        /** 未达阈值时回弹的时长 */
+        private const val FLING_SETTLE_MS = 200L
+
+        private const val FLING_EXIT_MS = 200L
         private const val FLING_EXIT_DP = 40
 
         /** 低电量模式下静态展示的时长 */
